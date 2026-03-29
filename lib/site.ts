@@ -1,8 +1,8 @@
 export const siteConfig = {
   name: "thewestrep",
-  title: "thewestrep | Stock inmediato y encargues internacionales",
+  title: "thewestrep | Streetwear importado, stock inmediato y encargues internacionales",
   description:
-    "Landing premium para thewestrep: moda importada, stock inmediato, encargues internacionales y atención directa por WhatsApp.",
+    "Streetwear importado con stock inmediato y encargues internacionales. Impuestos incluidos, sin trámites después del pago y envío coordinado por WhatsApp.",
   url: "https://thewestrep.vercel.app",
   locale: "es",
   whatsappUrl: "https://wa.me/?text=",

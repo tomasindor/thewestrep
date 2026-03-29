@@ -1,0 +1,19 @@
+<svg width="1200" height="1500" viewBox="0 0 1200 1500" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1200" height="1500" fill="#0B0D12"/>
+  <rect x="70" y="70" width="1060" height="1360" rx="44" fill="url(#bg)"/>
+  <path d="M246 930C338 930 380 840 476 840H730C778 840 822 856 856 888L951 978C991 1015 1046 1036 1103 1036V1114H233C192 1114 159 1081 159 1040V1017C159 969 198 930 246 930Z" fill="#F4F5F7"/>
+  <path d="M474 840L407 717C391 687 405 651 437 633L584 553L696 840H474Z" fill="#DADDE3"/>
+  <path d="M392 1021H995" stroke="#A8AFB9" stroke-width="26" stroke-linecap="round"/>
+  <path d="M496 761H672" stroke="#111418" stroke-width="18" stroke-linecap="round"/>
+  <path d="M523 707H649" stroke="#111418" stroke-width="18" stroke-linecap="round"/>
+  <circle cx="296" cy="1041" r="67" fill="#111418"/>
+  <circle cx="873" cy="1041" r="67" fill="#111418"/>
+  <text x="118" y="170" fill="#F8D6C8" font-family="Arial, sans-serif" font-size="48" letter-spacing="10">THEWESTREP</text>
+  <text x="118" y="1320" fill="#C6CBD4" font-family="Arial, sans-serif" font-size="42" letter-spacing="4">SNEAKER SAMPLE</text>
+  <defs>
+    <linearGradient id="bg" x1="140" y1="120" x2="1046" y2="1380" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#161A22"/>
+      <stop offset="1" stop-color="#0F1218"/>
+    </linearGradient>
+  </defs>
+</svg>

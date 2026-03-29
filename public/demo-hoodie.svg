@@ -1,0 +1,18 @@
+<svg width="1200" height="1500" viewBox="0 0 1200 1500" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1200" height="1500" fill="#090B10"/>
+  <rect x="70" y="70" width="1060" height="1360" rx="44" fill="url(#bg)"/>
+  <path d="M429 345C468 286 534 250 600 250C666 250 732 286 771 345L832 438C860 480 875 530 875 581V1014C875 1052 844 1083 806 1083H394C356 1083 325 1052 325 1014V581C325 530 340 480 368 438L429 345Z" fill="#242933"/>
+  <path d="M481 365C505 322 550 296 600 296C650 296 695 322 719 365L756 432H444L481 365Z" fill="#313745"/>
+  <path d="M325 546L229 667C208 693 197 726 197 760V1004C197 1047 232 1082 275 1082H325V546Z" fill="#1A1F28"/>
+  <path d="M875 546L971 667C992 693 1003 726 1003 760V1004C1003 1047 968 1082 925 1082H875V546Z" fill="#1A1F28"/>
+  <path d="M534 635H666" stroke="#F3F5F8" stroke-width="18" stroke-linecap="round"/>
+  <path d="M600 432V566" stroke="#12161C" stroke-width="20" stroke-linecap="round"/>
+  <text x="118" y="170" fill="#F8D6C8" font-family="Arial, sans-serif" font-size="48" letter-spacing="10">THEWESTREP</text>
+  <text x="118" y="1320" fill="#C6CBD4" font-family="Arial, sans-serif" font-size="42" letter-spacing="4">HOODIE SAMPLE</text>
+  <defs>
+    <linearGradient id="bg" x1="140" y1="120" x2="1046" y2="1380" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#161A22"/>
+      <stop offset="1" stop-color="#0E1016"/>
+    </linearGradient>
+  </defs>
+</svg>

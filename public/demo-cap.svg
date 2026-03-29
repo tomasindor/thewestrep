@@ -1,0 +1,17 @@
+<svg width="1200" height="1500" viewBox="0 0 1200 1500" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1200" height="1500" fill="#090B10"/>
+  <rect x="70" y="70" width="1060" height="1360" rx="44" fill="url(#bg)"/>
+  <path d="M360 700C360 559 474 445 615 445C741 445 846 536 868 657L884 745H360V700Z" fill="#232833"/>
+  <path d="M360 745H884V830C884 879 844 919 795 919H449C400 919 360 879 360 830V745Z" fill="#2E3542"/>
+  <path d="M882 773C961 773 1028 829 1047 906L1056 941H789L807 889C820 854 848 823 882 773Z" fill="#1A1F28"/>
+  <path d="M612 496V691" stroke="#161A20" stroke-width="18" stroke-linecap="round"/>
+  <text x="489" y="634" fill="#F8D6C8" font-family="Arial, sans-serif" font-size="60" letter-spacing="10">TWR</text>
+  <text x="118" y="170" fill="#F8D6C8" font-family="Arial, sans-serif" font-size="48" letter-spacing="10">THEWESTREP</text>
+  <text x="118" y="1320" fill="#C6CBD4" font-family="Arial, sans-serif" font-size="42" letter-spacing="4">CAP SAMPLE</text>
+  <defs>
+    <linearGradient id="bg" x1="140" y1="120" x2="1046" y2="1380" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#161A22"/>
+      <stop offset="1" stop-color="#0E1016"/>
+    </linearGradient>
+  </defs>
+</svg>

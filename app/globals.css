@@ -10,6 +10,7 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  --font-display: var(--font-barlow-condensed);
 }
 
 * {
@@ -18,17 +19,19 @@
 
 html {
   scroll-behavior: smooth;
+  min-height: 100%;
 }
 
 body {
-  background: var(--background);
+  background-color: var(--background);
   color: var(--foreground);
   font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
   background-image:
-    radial-gradient(circle at 15% 20%, rgba(255, 106, 0, 0.18), transparent 22%),
-    radial-gradient(circle at 82% 18%, rgba(255, 51, 102, 0.14), transparent 20%),
-    radial-gradient(circle at 50% 78%, rgba(65, 105, 225, 0.14), transparent 24%),
-    linear-gradient(180deg, #05060a 0%, #090b11 50%, #05060a 100%);
+    radial-gradient(circle at 18% 0%, rgba(255, 94, 58, 0.2), transparent 28rem),
+    radial-gradient(circle at 82% 12%, rgba(255, 31, 122, 0.12), transparent 24rem),
+    radial-gradient(circle at 50% 42%, rgba(111, 89, 255, 0.08), transparent 36rem),
+    linear-gradient(180deg, #05060a 0%, #06070b 30%, #080b11 62%, #05060a 100%);
+  background-repeat: no-repeat;
   min-height: 100vh;
 }
 
@@ -40,13 +43,6 @@ a {
 ::selection {
   background: rgba(255, 110, 64, 0.3);
   color: #fffaf5;
-}
-
-.premium-grid {
-  background-image:
-    linear-gradient(rgba(255, 255, 255, 0.045) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.045) 1px, transparent 1px);
-  background-size: 48px 48px;
 }
 
 .glass-panel {
@@ -88,4 +84,8 @@ a {
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
+}
+
+.font-display {
+  font-family: var(--font-barlow-condensed), Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif;
 }

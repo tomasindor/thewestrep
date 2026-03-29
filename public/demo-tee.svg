@@ -1,0 +1,16 @@
+<svg width="1200" height="1500" viewBox="0 0 1200 1500" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1200" height="1500" fill="#090B10"/>
+  <rect x="70" y="70" width="1060" height="1360" rx="44" fill="url(#bg)"/>
+  <path d="M448 341C483 301 540 278 600 278C660 278 717 301 752 341L863 470L764 566L705 509V1039C705 1074 677 1102 642 1102H558C523 1102 495 1074 495 1039V509L436 566L337 470L448 341Z" fill="#F2F4F7"/>
+  <path d="M531 348C551 330 575 320 600 320C625 320 649 330 669 348L710 391L653 450C624 480 576 480 547 450L490 391L531 348Z" fill="#D5DAE2"/>
+  <rect x="512" y="629" width="176" height="66" rx="24" fill="#111418"/>
+  <text x="600" y="676" text-anchor="middle" fill="#F8D6C8" font-family="Arial, sans-serif" font-size="26" letter-spacing="4">TWR</text>
+  <text x="118" y="170" fill="#F8D6C8" font-family="Arial, sans-serif" font-size="48" letter-spacing="10">THEWESTREP</text>
+  <text x="118" y="1320" fill="#C6CBD4" font-family="Arial, sans-serif" font-size="42" letter-spacing="4">TEE SAMPLE</text>
+  <defs>
+    <linearGradient id="bg" x1="140" y1="120" x2="1046" y2="1380" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#161A22"/>
+      <stop offset="1" stop-color="#10131A"/>
+    </linearGradient>
+  </defs>
+</svg>
