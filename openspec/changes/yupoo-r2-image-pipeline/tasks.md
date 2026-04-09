@@ -14,9 +14,9 @@
 - [x] 2.5 Run database migration to create staging tables
 
 ## Phase 3: Core Implementation - Ingestion
-- [ ] 3.1 Create `lib/imports/ingestion.ts` shared service with: parseYupooUrl, downloadImage, generateVariants, storeInR2, createStagingRecords
+- [x] 3.1 Create `lib/imports/ingestion.ts` shared service with: parseYupooUrl, downloadImage, generateVariants, storeInR2, createStagingRecords
 - [ ] 3.2 Create `lib/imports/promotion.ts` with: promoteImportItem, copyToProducts, createProductImages, preserveSizeGuides, updateProductImageUrls
-- [ ] 3.3 Modify `scripts/import-yupoo.ts` to call `lib/imports/ingestion.ts` instead of direct DB writes
+- [x] 3.3 Modify `scripts/import-yupoo.ts` to call `lib/imports/ingestion.ts` instead of direct DB writes
 - [ ] 3.4 Add single-item import endpoint in admin that calls `lib/imports/ingestion.ts`
 
 ## Phase 4: Admin Curation UI

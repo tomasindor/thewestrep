@@ -7,12 +7,11 @@
 
 import * as cheerio from "cheerio";
 import { getDb } from "@/lib/db/core";
-import { brands, categories, products, productImages, productSizes, productVariants } from "@/lib/db/schema";
+import { brands, categories } from "@/lib/db/schema";
 import { createId, slugify } from "@/lib/utils";
-import { buildProductWhatsappCta, buildProductWhatsappMessage } from "@/lib/catalog/whatsapp";
-import { reorderLikelySizeGuideImageUrls } from "@/lib/catalog/size-guides";
 import { loadCliEnv } from "@/lib/env/load-cli";
 import { canonicalizeYupooImageCandidates, getYupooCanonicalKey } from "@/lib/yupoo-core";
+import { buildBulkIngestionInput, ingestYupooSource } from "@/lib/imports/ingestion";
 
 // =====================================================
 // MAPA DE MARCAS CAMUFLADAS → NOMBRES REALES
@@ -935,11 +934,7 @@ async function processAlbum(
     // Si el nombre quedó vacío, usar "Marca + Categoría"
     const productName = cleanedName || `${brandName} ${garmentType}`;
 
-    // 3. Buscar/crear marca y categoría
-    const brand = await findOrCreateBrand(db, brandName);
-    const category = await findOrCreateCategory(db, garmentType);
-
-    // 4. Extraer imágenes
+    // 3. Extraer imágenes
     const albumSlug = album.href.split("?")[0];
     const albumUrl = `${YUPOO_BASE}${albumSlug}?uid=1`;
     const albumData = await extractYupooAlbumData(albumUrl);
@@ -948,7 +943,7 @@ async function processAlbum(
       return { success: false, error: "Sin imágenes" };
     }
 
-    // 5. Extraer link de Weidian y obtener talles/variantes
+    // 4. Extraer link de Weidian y obtener talles/variantes
     let sizes: string[] = [];
     let variants: string[] = [];
 
@@ -958,74 +953,33 @@ async function processAlbum(
       variants = weidianData.variants;
     }
 
-    // 6. Crear producto
-    const productId = createId("product");
+    // 5. Normalizar datos económicos/base para staging
     const slug = `${slugify(productName)}-${album.albumId}`;
     const priceYuan = album.price ?? 0;
     const priceArs = priceYuan > 0 ? priceYuan * 200 + 50000 : 0;
 
-    await db.insert(products).values({
-      id: productId,
-      type: "encargue",
-      name: productName,
-      slug,
-      brandId: brand.id,
-      categoryId: category.id,
-      priceArs,
-      description: "",
-      availabilityNote: "",
-      whatsappCtaLabel: buildProductWhatsappCta("encargue"),
-      whatsappMessage: buildProductWhatsappMessage({
+    // 6. Ingestar a staging (shared pipeline)
+    const ingestionInput = buildBulkIngestionInput({
+      albumUrl,
+      albumHref: album.href,
+      imageUrls: albumData.images,
+      productData: {
+        albumId: album.albumId,
+        rawName: album.rawName,
         productName,
-        availability: "encargue",
-      }),
-      state: "draft",
-      sourceUrl: albumUrl,
-      createdAt: new Date(),
-      updatedAt: new Date(),
+        slug,
+        brandName,
+        categoryName: garmentType,
+        sourceUrl: albumUrl,
+        weidianUrl: albumData.weidianUrl,
+        sizes,
+        variants,
+        priceYuan,
+        priceArs,
+      },
     });
 
-    const orderedImageUrls = reorderLikelySizeGuideImageUrls(albumData.images, { sourcePageUrl: albumUrl });
-
-    // 7. Insertar imágenes (ordenadas: principal primero, medidas al final)
-    await db.insert(productImages).values(
-      orderedImageUrls.map((url, index) => ({
-        id: createId("image"),
-        productId,
-        url,
-        sourceUrl: url,
-        alt: `${productName} ${index + 1}`,
-        position: index,
-        source: "yupoo" as const,
-        createdAt: new Date(),
-      })),
-    );
-
-    // 8. Insertar talles
-    if (sizes.length > 0) {
-      await db.insert(productSizes).values(
-        sizes.map((label, index) => ({
-          id: createId("size"),
-          productId,
-          label,
-          position: index,
-          createdAt: new Date(),
-        })),
-      );
-    }
-
-    // 9. Insertar variantes (colores traducidos)
-    if (variants.length > 0) {
-      await db.insert(productVariants).values(
-        variants.map((label, index) => ({
-          id: createId("variant"),
-          productId,
-          label,
-          position: index,
-          createdAt: new Date(),
-        })),
-      );
-    }
+    await ingestYupooSource(ingestionInput, { db });
 
     return { success: true, brand: brandName, category: garmentType };
   } catch (error) {
