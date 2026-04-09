@@ -1,10 +1,10 @@
 # Tasks: Yupoo R2 Image Pipeline
 
 ## Phase 1: Infrastructure / Foundation
-- [ ] 1.1 Add R2 credentials to `lib/env/shared.ts`: `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME`
-- [ ] 1.2 Create `lib/media/storage.ts` with R2 client wrapper (put, get, delete, list operations)
-- [ ] 1.3 Create `lib/media/variants.ts` with variant generation using sharp (thumb, cart-thumb, card, detail, lightbox, admin-preview)
-- [ ] 1.4 Define `ImageVariantsManifest` interface in `lib/types/media.ts`
+- [x] 1.1 Add R2 credentials to `lib/env/shared.ts`: `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME`
+- [x] 1.2 Create `lib/media/storage.ts` with R2 client wrapper (put, get, delete, list operations)
+- [x] 1.3 Create `lib/media/variants.ts` with variant generation using sharp (thumb, cart-thumb, card, detail, lightbox, admin-preview)
+- [x] 1.4 Define `ImageVariantsManifest` interface in `lib/types/media.ts`
 
 ## Phase 2: Schema / Data Layer
 - [ ] 2.1 Add `import_jobs` table to `lib/db/schema.ts` (id, status, source, sourceReference, createdAt, updatedAt)
