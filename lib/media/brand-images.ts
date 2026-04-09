@@ -390,23 +390,32 @@ export async function cleanupManagedBrandImage(currentImage?: ManagedBrandImageR
     return { warning: undefined as string | undefined };
   }
 
-  if (currentImage.imageProvider === "cloudinary") {
-    const removed = await destroyCloudinaryAsset(currentImage.imageAssetKey);
+  try {
+    if (currentImage.imageProvider === "cloudinary") {
+      const removed = await destroyCloudinaryAsset(currentImage.imageAssetKey);
 
-    if (!removed) {
-      return {
-        warning: "No pudimos confirmar la limpieza del asset anterior en Cloudinary porque faltan credenciales o el provider no respondió como esperábamos.",
-      };
+      if (!removed) {
+        return {
+          warning: "No pudimos confirmar la limpieza del asset gestionado en Cloudinary porque faltan credenciales o el provider no respondió como esperábamos.",
+        };
+      }
+
+      return { warning: undefined };
+    }
+
+    if (currentImage.imageProvider === "local") {
+      await destroyLocalAsset(currentImage.imageAssetKey);
     }
 
     return { warning: undefined };
+  } catch {
+    return {
+      warning:
+        currentImage.imageProvider === "cloudinary"
+          ? "Falló la limpieza del asset gestionado en Cloudinary. La marca igual se guardó, pero conviene revisar ese recurso remoto."
+          : "Falló la limpieza del archivo local gestionado. La marca igual se guardó, pero conviene revisar /public/uploads/brands.",
+    };
   }
-
-  if (currentImage.imageProvider === "local") {
-    await destroyLocalAsset(currentImage.imageAssetKey);
-  }
-
-  return { warning: undefined };
 }
 
 export async function persistManagedBrandImage({ entity, name, sourceUrl, currentImage }: PersistBrandImageInput): Promise<ManagedBrandImageState> {
@@ -415,25 +424,16 @@ export async function persistManagedBrandImage({ entity, name, sourceUrl, curren
   const persistenceTarget = resolveBrandImagePersistenceTarget();
 
   if (!normalizedSourceUrl) {
-    const cleanup = await cleanupManagedBrandImage(currentImage);
-    return createEmptyManagedImageState(cleanup.warning);
+    return createEmptyManagedImageState();
   }
 
   if (normalizedSourceUrl.startsWith("/")) {
-    const cleanup =
-      normalizedSourceUrl === currentImage?.imageUrl && !currentImage?.imageProvider
-        ? { warning: undefined }
-        : await cleanupManagedBrandImage(currentImage);
-
-    return withWarning(
-      {
-        imageUrl: normalizedSourceUrl,
-        imageSourceUrl: normalizedSourceUrl,
-        imageProvider: null,
-        imageAssetKey: null,
-      },
-      cleanup.warning,
-    );
+    return withWarning({
+      imageUrl: normalizedSourceUrl,
+      imageSourceUrl: normalizedSourceUrl,
+      imageProvider: null,
+      imageAssetKey: null,
+    });
   }
 
   const normalizedRemoteSourceUrl = normalizeRemoteSourceUrl(normalizedSourceUrl);
@@ -459,25 +459,19 @@ export async function persistManagedBrandImage({ entity, name, sourceUrl, curren
             imageAssetKey: null,
           }
         : await persistBrandImageLocally(name, fetchedImage);
-  const cleanup = await cleanupManagedBrandImage(currentImage);
-
   if (persistenceTarget.kind === "cloudinary") {
-    return withWarning(nextImage, cleanup.warning);
+    return withWarning(nextImage);
   }
 
   if (persistenceTarget.kind === "vercel-unmanaged") {
     return withWarning(
       nextImage,
-      cleanup.warning
-        ? `${cleanup.warning} Además, como Cloudinary no está configurado en Vercel, dejamos la URL remota sin gestión de lifecycle.`
-        : "Cloudinary no está configurado en Vercel, así que dejamos la URL remota sin gestión de lifecycle.",
+      "Cloudinary no está configurado en Vercel, así que dejamos la URL remota sin gestión de lifecycle.",
     );
   }
 
   return withWarning(
     nextImage,
-    cleanup.warning
-      ? `${cleanup.warning} Cloudinary no está configurado, así que guardamos la imagen localmente para desarrollo.`
-      : "Cloudinary no está configurado, así que guardamos la imagen localmente para desarrollo.",
+    "Cloudinary no está configurado, así que guardamos la imagen localmente para desarrollo.",
   );
 }

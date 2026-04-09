@@ -1,4 +1,9 @@
+import type { CSSProperties } from "react";
+
 import Image from "next/image";
+
+import { isCloudinaryAssetUrl } from "@/lib/media/cloudinary";
+import { buildRemoteImageProxyUrl, shouldProxyRemoteImage } from "@/lib/media/remote-image-proxy";
 
 type SmartImageProps = {
   src: string;
@@ -9,13 +14,32 @@ type SmartImageProps = {
   className?: string;
   sizes?: string;
   priority?: boolean;
+  style?: CSSProperties;
 };
 
-export function SmartImage({ src, alt, fill, width, height, className, sizes, priority }: SmartImageProps) {
-  if (src.startsWith("/")) {
+export function resolveSmartImageSrc(src: string) {
+  return shouldProxyRemoteImage(src) ? buildRemoteImageProxyUrl(src) : src;
+}
+
+export function SmartImage({ src, alt, fill, width, height, className, sizes, priority, style }: SmartImageProps) {
+  const resolvedSrc = resolveSmartImageSrc(src);
+  const shouldUseProxy = resolvedSrc !== src;
+  const isCloudinarySrc = isCloudinaryAssetUrl(resolvedSrc);
+
+  if (shouldUseProxy) {
+    if (fill) {
+      // eslint-disable-next-line @next/next/no-img-element
+      return <img src={resolvedSrc} alt={alt} className={`absolute inset-0 h-full w-full ${className ?? ""}`} style={style} />;
+    }
+
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img src={resolvedSrc} alt={alt} className={className} width={width} height={height} style={style} />;
+  }
+
+  if (resolvedSrc.startsWith("/") || isCloudinarySrc) {
     return (
       <Image
-        src={src}
+        src={resolvedSrc}
         alt={alt}
         fill={fill}
         width={width}
@@ -23,15 +47,17 @@ export function SmartImage({ src, alt, fill, width, height, className, sizes, pr
         className={className}
         sizes={sizes}
         priority={priority}
+        style={style}
+        unoptimized={isCloudinarySrc}
       />
     );
   }
 
   if (fill) {
     // eslint-disable-next-line @next/next/no-img-element
-    return <img src={src} alt={alt} className={`absolute inset-0 h-full w-full ${className ?? ""}`} />;
+    return <img src={resolvedSrc} alt={alt} className={`absolute inset-0 h-full w-full ${className ?? ""}`} style={style} />;
   }
 
   // eslint-disable-next-line @next/next/no-img-element
-  return <img src={src} alt={alt} className={className} width={width} height={height} />;
+  return <img src={resolvedSrc} alt={alt} className={className} width={width} height={height} style={style} />;
 }

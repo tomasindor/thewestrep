@@ -6,7 +6,15 @@ import { redirect } from "next/navigation";
 import { authOptions } from "@/lib/auth";
 
 export async function getAdminSession() {
-  return getServerSession(authOptions);
+  const session = await getServerSession(authOptions);
+
+  return session?.user?.role === "admin" ? session : null;
+}
+
+export async function getCustomerSession() {
+  const session = await getServerSession(authOptions);
+
+  return session?.user?.role === "customer" ? session : null;
 }
 
 export async function requireAdminSession() {

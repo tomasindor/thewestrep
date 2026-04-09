@@ -8,7 +8,7 @@ export function CartHeaderButton() {
 
   return (
     <button type="button" onClick={openCart} className={compactGhostCtaClassName} aria-label="Abrir carrito">
-      {itemCount > 0 ? `Checkout (${itemCount})` : "Carrito"}
+      {itemCount > 0 ? `Carrito (${itemCount})` : "Carrito"}
     </button>
   );
 }

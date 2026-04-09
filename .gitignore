@@ -25,6 +25,11 @@
 # misc
 .DS_Store
 *.pem
+*.Zone.Identifier
+
+# generated/public assets
+/public/img-cache/
+/public/brand-logos/*.zip
 
 # debug
 npm-debug.log*

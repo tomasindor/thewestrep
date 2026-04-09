@@ -50,7 +50,8 @@ test("renders the accepted /catalogo hub with logo and two blocks only", async (
   await page.goto("/catalogo");
 
   await expect(page.getByRole("link", { name: /volver al inicio/i })).toBeVisible();
-  await expect(page.getByRole("heading", { level: 1 })).toHaveCount(0);
+  await expect(page.getByRole("heading", { level: 1, name: /^catálogo$/i })).toBeVisible();
+  await expect(page.getByRole("link", { name: /selección inmediata/i })).toBeVisible();
 
   const stockEntry = page.getByRole("link", { name: /abrir stock/i });
   const encargueEntry = page.getByRole("link", { name: /abrir encargues/i });
@@ -152,14 +153,15 @@ test("shows commercial context on listing cards and PDP before WhatsApp conversi
   await expect(stockCard.getByText(/3 talles/i)).toBeVisible();
 
   await openProductDetailFromListing(page, "stock", stockProduct);
-  await expect(page.getByRole("heading", { name: /reservá con precio, talle y entrega claros/i })).toBeVisible();
-  await expect(page.getByRole("heading", { name: /cómo funciona el stock/i })).toBeVisible();
+  await expect(page.getByRole("heading", { name: new RegExp(stockProduct.name, "i") })).toBeVisible();
+  await expect(page.getByText(/detalle del producto/i)).toBeVisible();
+  await expect(page.getByText(/tiempo estimado/i)).toBeVisible();
   await expect(page.getByText(/coordiná stock y entrega por whatsapp/i).first()).toBeVisible();
   await expect(page.getByText(/entrega coordinada en 24\/48 hs/i)).toBeVisible();
 
   await page.goto(`/encargue/${encargueProduct.slug}`);
 
-  await expect(page.getByRole("heading", { name: /cotizá con plazo y referencia visibles desde la ficha/i })).toBeVisible();
+  await expect(page.getByRole("heading", { name: new RegExp(encargueProduct.name, "i") })).toBeVisible();
   await expect(page.getByText(/arribo estimado de 40-60 días/i)).toBeVisible();
 });
 

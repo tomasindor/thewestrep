@@ -5,7 +5,15 @@ import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 
 import { getDb, getDbSql } from "@/lib/db/client";
 import { getBrandSchemaCompatibility, getBrandSchemaCompatibilityWarning } from "@/lib/db/brands-schema-compat";
-import { brands, categories, productImages, products, productSizes, productVariants } from "@/lib/db/schema";
+import {
+  getProductImagesSchemaCompatibility,
+  getProductImagesSchemaCompatibilityWarning,
+} from "@/lib/db/product-images-schema-compat";
+import {
+  getProductSizeGuidesSchemaCompatibility,
+  getProductSizeGuidesSchemaCompatibilityWarning,
+} from "@/lib/db/product-size-guides-schema-compat";
+import { brands, categories, productImages, products, productSizeGuides, productSizes, productVariants } from "@/lib/db/schema";
 import { buildEditableCommercialAvailabilityBySlug, enrichCommercialAvailabilityInfo } from "@/lib/catalog/commercial-availability";
 import {
   cleanupManagedBrandImage,
@@ -13,6 +21,15 @@ import {
   type ManagedImageProvider,
   persistManagedBrandImage,
 } from "@/lib/media/brand-images";
+import {
+  cleanupManagedProductImage,
+  persistManagedProductImage,
+  type ManagedProductImageProvider,
+  type ManagedProductImageRecord,
+  type ManagedProductImageReference,
+} from "@/lib/media/product-image-persistence";
+import { resolvePreferredBrandLogoSrc } from "@/lib/media/brand-logo-variants";
+import { getCloudinaryConfig } from "@/lib/env/shared";
 import { persistRemoteImageLocally } from "@/lib/media/persistence";
 import type {
   Brand,
@@ -20,17 +37,27 @@ import type {
   Product,
   ProductAvailability,
   ProductAvailabilityInfo,
+  ProductSizeGuide,
   ProductSize,
   ProductState,
 } from "@/lib/catalog/types";
 import { catalogInventorySource } from "@/lib/catalog/data/inventory";
+import {
+  buildBrandImageAlt,
+  buildCategoryImageAlt,
+  buildProductImageAlt,
+} from "@/lib/catalog/image-alt";
 import { buildProductWhatsappCta, buildProductWhatsappMessage } from "@/lib/catalog/whatsapp";
+import { getDisplayGalleryImages, normalizeProductSizeGuide, reorderLikelySizeGuideImageUrls } from "@/lib/catalog/size-guides";
 import { createId, defaultProductImage, formatArs, slugify, uniqueValues } from "@/lib/utils";
+import { canonicalizeYupooImageCandidates } from "@/lib/yupoo";
 
 const DEFAULT_PRODUCT_NOTE: Record<ProductAvailability, string> = {
-  stock: "Consultá disponibilidad y coordinamos por WhatsApp.",
-  encargue: "Pedilo por encargue y te pasamos precio final por WhatsApp.",
+  stock: "",
+  encargue: "",
 };
+
+const MIN_HOMEPAGE_STOCK_PRODUCTS = 5;
 
 function mapFallbackBrands() {
   return catalogInventorySource.brands.map((brand) => ({
@@ -39,7 +66,7 @@ function mapFallbackBrands() {
     slug: brand.slug,
     image: brand.image,
     imageSourceUrl: brand.image,
-    alt: brand.alt,
+    alt: buildBrandImageAlt(brand.name),
     featuredOnHomepage: brand.featuredOnHomepage,
   })) satisfies Brand[];
 }
@@ -51,29 +78,58 @@ function mapFallbackCategories() {
     slug: category.slug,
     description: category.description,
     image: category.image,
-    alt: category.alt,
+    alt: buildCategoryImageAlt(category.name),
     featuredOnHomepage: category.featuredOnHomepage,
     featuredOnHero: category.featuredOnHero,
   })) satisfies Category[];
 }
 
 function mapFallbackProducts() {
-  return catalogInventorySource.products.map((product) => ({
-    ...product,
-    sku: undefined,
-    state: "published" as const,
-    pricing: {
-      amount: product.pricing.amount,
-      currency: "ARS" as const,
-      display: formatArs(product.pricing.amount),
-    },
-    note: product.note || DEFAULT_PRODUCT_NOTE[product.availability],
-    whatsappCtaLabel: buildProductWhatsappCta(product.availability),
-    whatsappMessage: buildProductWhatsappMessage({
-      productName: product.name,
-      availability: product.availability,
-    }),
-  })) satisfies Product[];
+  return catalogInventorySource.products.map((product) => {
+    const brandName = catalogInventorySource.brands.find((brand) => brand.id === product.brandId)?.name;
+    const categoryName = catalogInventorySource.categories.find((category) => category.id === product.categoryId)?.name;
+    const fallbackImage = defaultProductImage(product.name, brandName, categoryName);
+    const displayGallery = getDisplayGalleryImages(product.gallery, product.sizeGuide, product.sourceUrl);
+    const rawGallery = (displayGallery.length > 0 ? displayGallery : product.gallery).map((image, index) => ({
+      ...image,
+      alt: buildProductImageAlt({
+        productName: product.name,
+        brandName,
+        categoryName,
+        imageIndex: index + 1,
+        totalImages: Math.max(displayGallery.length > 0 ? displayGallery.length : product.gallery.length, 1),
+        role: image.role,
+      }),
+    }));
+
+    return {
+      ...product,
+      sku: undefined,
+      state: "published" as const,
+      pricing: {
+        amount: product.pricing.amount,
+        currency: "ARS" as const,
+        display: formatArs(product.pricing.amount),
+      },
+      note: product.note || DEFAULT_PRODUCT_NOTE[product.availability],
+      whatsappCtaLabel: buildProductWhatsappCta(product.availability),
+      whatsappMessage: buildProductWhatsappMessage({
+        productName: product.name,
+        availability: product.availability,
+      }),
+      gallery:
+        rawGallery.length > 0
+          ? rawGallery
+          : [
+              {
+                id: `${product.id}-cover`,
+                src: fallbackImage.src,
+                alt: fallbackImage.alt,
+                role: "cover" as const,
+              },
+            ],
+    };
+  }) satisfies Product[];
 }
 
 const fallbackData = {
@@ -82,7 +138,65 @@ const fallbackData = {
   products: mapFallbackProducts(),
 };
 
+async function resolvePreferredBrandLogos(brands: readonly Brand[]) {
+  return Promise.all(
+    brands.map(async (brand) => {
+      const preferredImage = await resolvePreferredBrandLogoSrc(brand.image);
+
+      return preferredImage === brand.image ? brand : { ...brand, image: preferredImage };
+    }),
+  );
+}
+
+function mergeEntitiesById<T extends { id: string }>(primary: readonly T[], fallback: readonly T[]) {
+  const entitiesById = new Map(primary.map((entity) => [entity.id, entity]));
+
+  for (const entity of fallback) {
+    if (!entitiesById.has(entity.id)) {
+      entitiesById.set(entity.id, entity);
+    }
+  }
+
+  return Array.from(entitiesById.values());
+}
+
+function countPublishedStockProducts(products: readonly Product[]) {
+  return products.filter((product) => product.availability === "stock" && product.state === "published").length;
+}
+
+function supplementStockProducts(dataset: {
+  brands: readonly Brand[];
+  categories: readonly Category[];
+  products: readonly Product[];
+}) {
+  if (countPublishedStockProducts(dataset.products) >= MIN_HOMEPAGE_STOCK_PRODUCTS) {
+    return {
+      brands: [...dataset.brands],
+      categories: [...dataset.categories],
+      products: [...dataset.products],
+    };
+  }
+
+  const existingProductIds = new Set(dataset.products.map((product) => product.id));
+  const supplementalStockProducts = fallbackData.products.filter(
+    (product) => product.availability === "stock" && !existingProductIds.has(product.id),
+  );
+
+  const missingProductsCount = MIN_HOMEPAGE_STOCK_PRODUCTS - countPublishedStockProducts(dataset.products);
+  const nextProducts = [...dataset.products, ...supplementalStockProducts.slice(0, missingProductsCount)];
+
+  return {
+    brands: mergeEntitiesById(dataset.brands, fallbackData.brands),
+    categories: mergeEntitiesById(dataset.categories, fallbackData.categories),
+    products: nextProducts,
+  };
+}
+
 function parseManagedImageProvider(value: string | null | undefined): ManagedImageProvider | null {
+  return value === "cloudinary" || value === "local" ? value : null;
+}
+
+function parseManagedProductImageProvider(value: string | null | undefined): ManagedProductImageProvider | null {
   return value === "cloudinary" || value === "local" ? value : null;
 }
 
@@ -100,6 +214,22 @@ function mapManagedBrandImageReference(record: {
   };
 }
 
+function mapManagedProductImageReference(record: {
+  url?: string | null;
+  sourceUrl?: string | null;
+  provider?: string | null;
+  assetKey?: string | null;
+  cloudName?: string | null;
+}): ManagedProductImageReference {
+  return {
+    url: record.url ?? undefined,
+    sourceUrl: record.sourceUrl ?? null,
+    provider: parseManagedProductImageProvider(record.provider),
+    assetKey: record.assetKey ?? null,
+    cloudName: record.cloudName ?? null,
+  };
+}
+
 interface BrandRowCompat {
   id: string;
   name: string;
@@ -111,8 +241,100 @@ interface BrandRowCompat {
   imageAssetKey: string | null;
 }
 
+interface ProductImageRowCompat {
+  id: string;
+  productId: string;
+  url: string;
+  sourceUrl: string | null;
+  provider: string | null;
+  assetKey: string | null;
+  cloudName: string | null;
+  alt: string;
+  position: number;
+  source: "manual" | "yupoo";
+  createdAt: Date;
+}
+
+interface ProductSizeGuideRowCompat {
+  id: string;
+  productId: string;
+  title: string | null;
+  unitLabel: string | null;
+  notes: string | null;
+  sourceImageUrl: string | null;
+  columns: unknown;
+  rows: unknown;
+}
+
+function normalizeSizeGuideColumns(value: unknown) {
+  return Array.isArray(value) ? value.filter((item: unknown): item is string => typeof item === "string") : [];
+}
+
+function normalizeSizeGuideRows(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((row) => {
+    if (!row || typeof row !== "object") {
+      return [];
+    }
+
+    const label = "label" in row && typeof row.label === "string" ? row.label : "";
+    const values =
+      "values" in row && Array.isArray(row.values)
+        ? row.values.filter((item: unknown): item is string => typeof item === "string")
+        : [];
+
+    return [{ label, values }];
+  });
+}
+
+function mapProductSizeGuide(record: ProductSizeGuideRowCompat): ProductSizeGuide | undefined {
+  const normalizedGuide = normalizeProductSizeGuide({
+    title: record.title ?? undefined,
+    unitLabel: record.unitLabel ?? undefined,
+    notes: record.notes ?? undefined,
+    sourceImageUrl: record.sourceImageUrl ?? undefined,
+    columns: normalizeSizeGuideColumns(record.columns),
+    rows: normalizeSizeGuideRows(record.rows),
+  });
+
+  return normalizedGuide ?? undefined;
+}
+
 function mergeWarnings(...warnings: Array<string | undefined>) {
   return warnings.filter(Boolean).join(" ") || undefined;
+}
+
+function shouldCleanupPreviousManagedProductImage(
+  previousImage: ManagedProductImageReference | undefined,
+  nextImage: ManagedProductImageRecord,
+) {
+  if (!previousImage?.provider || !previousImage.assetKey) {
+    return false;
+  }
+
+  return previousImage.provider !== nextImage.provider || previousImage.assetKey !== nextImage.assetKey;
+}
+
+function normalizeProductImageSourceUrls(sourceUrl: string | undefined, imageUrls: string[]) {
+  const normalizedUrls = uniqueValues(imageUrls.map((imageUrl) => imageUrl.trim()).filter(Boolean));
+  const shouldCanonicalizeYupoo = Boolean(sourceUrl?.includes("yupoo")) || normalizedUrls.some((url) => url.includes("photo.yupoo.com"));
+  const canonicalizedUrls = shouldCanonicalizeYupoo ? canonicalizeYupooImageCandidates(normalizedUrls) : normalizedUrls;
+
+  return reorderLikelySizeGuideImageUrls(canonicalizedUrls, { sourcePageUrl: sourceUrl });
+}
+
+function shouldCleanupPreviousManagedBrandImage(
+  previousImage: ManagedBrandImageReference | undefined,
+  nextImage: ManagedBrandImageReference,
+) {
+  if (!previousImage?.imageProvider || !previousImage.imageAssetKey) {
+    return false;
+  }
+
+  return previousImage.imageProvider !== nextImage.imageProvider || previousImage.imageAssetKey !== nextImage.imageAssetKey;
 }
 
 function normalizeSqlRows<T>(result: unknown): T[] {
@@ -189,6 +411,86 @@ async function selectBrandManagedImageState(id: string) {
   return rows[0] ?? null;
 }
 
+async function selectProductImageRows() {
+  const sqlClient = getDbSql();
+  const compatibility = await getProductImagesSchemaCompatibility();
+
+  if (!sqlClient) {
+    return {
+      rows: [] as ProductImageRowCompat[],
+      compatibility,
+    };
+  }
+
+  const sourceUrlSelection = compatibility.hasSourceUrl ? "source_url" : "url";
+  const providerSelection = compatibility.hasProvider ? "provider" : "null::text";
+  const assetKeySelection = compatibility.hasAssetKey ? "asset_key" : "null::text";
+  const cloudNameSelection = compatibility.hasCloudName ? "cloud_name" : "null::text";
+  const result = await sqlClient.query(`
+    select
+      id,
+      product_id as "productId",
+      url,
+      ${sourceUrlSelection} as "sourceUrl",
+      ${providerSelection} as provider,
+      ${assetKeySelection} as "assetKey",
+      ${cloudNameSelection} as "cloudName",
+      alt,
+      position,
+      source,
+      created_at as "createdAt"
+    from product_images
+    order by position asc, created_at asc
+  `);
+
+  return {
+    rows: normalizeSqlRows<ProductImageRowCompat>(result),
+    compatibility,
+  };
+}
+
+async function selectProductManagedImageStates(productId: string) {
+  const sqlClient = getDbSql();
+  const compatibility = await getProductImagesSchemaCompatibility();
+
+  if (!sqlClient) {
+    return {
+      rows: [] as ProductImageRowCompat[],
+      compatibility,
+    };
+  }
+
+  const sourceUrlSelection = compatibility.hasSourceUrl ? "source_url" : "url";
+  const providerSelection = compatibility.hasProvider ? "provider" : "null::text";
+  const assetKeySelection = compatibility.hasAssetKey ? "asset_key" : "null::text";
+  const cloudNameSelection = compatibility.hasCloudName ? "cloud_name" : "null::text";
+  const result = await sqlClient.query(
+    `
+      select
+        id,
+        product_id as "productId",
+        url,
+        ${sourceUrlSelection} as "sourceUrl",
+        ${providerSelection} as provider,
+        ${assetKeySelection} as "assetKey",
+        ${cloudNameSelection} as "cloudName",
+        alt,
+        position,
+        source,
+        created_at as "createdAt"
+      from product_images
+      where product_id = $1
+      order by position asc, created_at asc
+    `,
+    [productId],
+  );
+
+  return {
+    rows: normalizeSqlRows<ProductImageRowCompat>(result),
+    compatibility,
+  };
+}
+
 const loadBrands = cache(async function loadBrands() {
   const dataset = await getCatalogDataset();
 
@@ -213,18 +515,24 @@ const loadDatabaseCatalog = cache(async function loadDatabaseCatalog() {
   }
 
   try {
-    const [brandRows, categoryRows, productRows, imageRows, sizeRows, variantRows] = await Promise.all([
+    const sizeGuideCompatibility = await getProductSizeGuidesSchemaCompatibility();
+    const [brandRows, categoryRows, productRows, productImageSelection, sizeRows, variantRows, sizeGuideRows] = await Promise.all([
       selectBrandRows(),
       db.select().from(categories).orderBy(asc(categories.name)),
       db.select().from(products).orderBy(desc(products.updatedAt), desc(products.createdAt)),
-      db.select().from(productImages).orderBy(asc(productImages.position), asc(productImages.createdAt)),
+      selectProductImageRows(),
       db.select().from(productSizes).orderBy(asc(productSizes.position), asc(productSizes.createdAt)),
       db.select().from(productVariants).orderBy(asc(productVariants.position), asc(productVariants.createdAt)),
+      sizeGuideCompatibility.hasTable
+        ? db.select().from(productSizeGuides).orderBy(desc(productSizeGuides.updatedAt), desc(productSizeGuides.createdAt))
+        : Promise.resolve([]),
     ]);
+    const imageRows = productImageSelection.rows;
 
     const imagesByProductId = new Map<string, typeof imageRows>();
     const sizesByProductId = new Map<string, typeof sizeRows>();
     const variantsByProductId = new Map<string, typeof variantRows>();
+    const sizeGuideByProductId = new Map<string, ProductSizeGuide | undefined>();
 
     for (const image of imageRows) {
       const images = imagesByProductId.get(image.productId) ?? [];
@@ -244,6 +552,10 @@ const loadDatabaseCatalog = cache(async function loadDatabaseCatalog() {
       variantsByProductId.set(variant.productId, variants);
     }
 
+    for (const sizeGuide of sizeGuideRows as ProductSizeGuideRowCompat[]) {
+      sizeGuideByProductId.set(sizeGuide.productId, mapProductSizeGuide(sizeGuide));
+    }
+
     const commercialAvailabilityBySlug = buildEditableCommercialAvailabilityBySlug();
 
     return {
@@ -254,7 +566,7 @@ const loadDatabaseCatalog = cache(async function loadDatabaseCatalog() {
         image: brand.imageUrl ?? undefined,
         imageSourceUrl: brand.imageSourceUrl ?? brand.imageUrl ?? undefined,
         imageProvider: brand.imageProvider ?? undefined,
-        alt: brand.imageAlt || `Imagen de ${brand.name}`,
+        alt: buildBrandImageAlt(brand.name),
       })) satisfies Brand[],
       categories: categoryRows.map((category) => ({
         id: category.id,
@@ -262,17 +574,50 @@ const loadDatabaseCatalog = cache(async function loadDatabaseCatalog() {
         slug: category.slug,
         description: category.description,
         image: category.imageUrl ?? "/destacada.png",
-        alt: category.imageAlt || `Imagen de ${category.name}`,
+        alt: buildCategoryImageAlt(category.name),
       })) satisfies Category[],
       products: productRows.map((product) => {
         const productImageRows = imagesByProductId.get(product.id) ?? [];
-        const fallbackImage = defaultProductImage(product.name);
+        const sizeGuide = sizeGuideByProductId.get(product.id);
+        const brandName = brandRows.find((brand) => brand.id === product.brandId)?.name;
+        const categoryName = categoryRows.find((category) => category.id === product.categoryId)?.name;
+        const fallbackImage = defaultProductImage(product.name, brandName, categoryName);
         const fallbackAvailabilityInfo = {
           summary:
             product.type === "stock"
               ? "Coordiná stock y entrega por WhatsApp."
               : "Cotización por encargue con WhatsApp como canal principal.",
         } satisfies ProductAvailabilityInfo;
+
+        const rawGallery =
+          productImageRows.length > 0
+            ? productImageRows.map((image, index) => ({
+                id: image.id,
+                src: image.url,
+                alt: buildProductImageAlt({
+                  productName: product.name,
+                  brandName,
+                  categoryName,
+                  imageIndex: index + 1,
+                  totalImages: productImageRows.length,
+                  role: index === 0 ? "cover" : "gallery",
+                }),
+                role: index === 0 ? ("cover" as const) : ("gallery" as const),
+                sourceUrl: image.sourceUrl ?? image.url,
+                provider: parseManagedProductImageProvider(image.provider) ?? undefined,
+                assetKey: image.assetKey ?? undefined,
+                cloudName: image.cloudName ?? getCloudinaryConfig()?.cloudName ?? undefined,
+              }))
+            : [
+                {
+                  id: `${product.id}-cover`,
+                  src: fallbackImage.src,
+                  alt: fallbackImage.alt,
+                  role: "cover" as const,
+                },
+              ];
+
+        const displayGallery = getDisplayGalleryImages(rawGallery, sizeGuide, product.sourceUrl ?? undefined);
 
         return {
           id: product.id,
@@ -287,7 +632,7 @@ const loadDatabaseCatalog = cache(async function loadDatabaseCatalog() {
             currency: "ARS" as const,
             display: formatArs(product.priceArs),
           },
-          detail: product.description || "Pieza curada por thewestrep.",
+           detail: product.description || "",
           note: product.availabilityNote || DEFAULT_PRODUCT_NOTE[product.type],
           whatsappCtaLabel: buildProductWhatsappCta(product.type),
           whatsappMessage: buildProductWhatsappMessage({
@@ -300,13 +645,8 @@ const loadDatabaseCatalog = cache(async function loadDatabaseCatalog() {
             commercialAvailabilityBySlug,
           ),
           gallery:
-            productImageRows.length > 0
-              ? productImageRows.map((image, index) => ({
-                  id: image.id,
-                  src: image.url,
-                  alt: image.alt || `Imagen ${index + 1} de ${product.name}`,
-                  role: index === 0 ? ("cover" as const) : ("gallery" as const),
-                }))
+            displayGallery.length > 0
+              ? displayGallery
               : [
                   {
                     id: `${product.id}-cover`,
@@ -320,6 +660,7 @@ const loadDatabaseCatalog = cache(async function loadDatabaseCatalog() {
             label: size.label,
             availability: mapSizeLabelToAvailability(product.type),
           })),
+          sizeGuide,
           variants: (variantsByProductId.get(product.id) ?? []).map((variant) => ({
             id: variant.id,
             label: variant.label,
@@ -335,7 +676,21 @@ const loadDatabaseCatalog = cache(async function loadDatabaseCatalog() {
 });
 
 export async function getCatalogDataset() {
-  return (await loadDatabaseCatalog()) ?? fallbackData;
+  const databaseCatalog = await loadDatabaseCatalog();
+
+  if (!databaseCatalog) {
+    return {
+      ...fallbackData,
+      brands: await resolvePreferredBrandLogos(fallbackData.brands),
+    };
+  }
+
+  const supplementedCatalog = supplementStockProducts(databaseCatalog);
+
+  return {
+    ...supplementedCatalog,
+    brands: await resolvePreferredBrandLogos(supplementedCatalog.brands),
+  };
 }
 
 export async function getBrandsRepository() {
@@ -375,6 +730,7 @@ export interface AdminProductInput {
   sourceUrl?: string;
   imageUrls: string[];
   sizes: string[];
+  sizeGuide?: ProductSizeGuide | null;
   variants: string[];
 }
 
@@ -411,8 +767,14 @@ export async function upsertProduct(input: AdminProductInput) {
     throw new Error("DATABASE_URL is required to create or edit products.");
   }
 
+  const normalizedImageSourceUrls = normalizeProductImageSourceUrls(input.sourceUrl, input.imageUrls);
+  const normalizedSizeGuide = normalizeProductSizeGuide(input.sizeGuide);
   const slug = await ensureUniqueSlug(input.name, input.id);
   const productId = input.id ?? createId("product");
+  const currentImageSelection = input.id ? await selectProductManagedImageStates(input.id) : null;
+  const currentImages = currentImageSelection?.rows ?? [];
+  const productImagesCompatibility = currentImageSelection?.compatibility ?? (await getProductImagesSchemaCompatibility());
+  const productSizeGuidesCompatibility = await getProductSizeGuidesSchemaCompatibility();
 
   const productValues = {
     id: productId,
@@ -438,23 +800,67 @@ export async function upsertProduct(input: AdminProductInput) {
     await db.update(products).set(productValues).where(eq(products.id, input.id));
     await db.delete(productImages).where(eq(productImages.productId, input.id));
     await db.delete(productSizes).where(eq(productSizes.productId, input.id));
+    if (productSizeGuidesCompatibility.hasTable) {
+      await db.delete(productSizeGuides).where(eq(productSizeGuides.productId, input.id));
+    }
     await db.delete(productVariants).where(eq(productVariants.productId, input.id));
   } else {
     await db.insert(products).values(productValues);
   }
 
-  if (input.imageUrls.length > 0) {
+  const currentImageBySourceUrl = new Map(
+    currentImages
+      .map((image) => [image.sourceUrl ?? image.url, image] as const)
+      .filter(([key]) => Boolean(key)),
+  );
+  const persistedImages: ManagedProductImageRecord[] = [];
+  const imageWarnings: Array<string | undefined> = [];
+
+  for (const [index, sourceUrl] of normalizedImageSourceUrls.entries()) {
+    const currentImage = currentImageBySourceUrl.get(sourceUrl);
+    const persistedImage = await persistManagedProductImage({
+      productName: input.name,
+      position: index,
+      sourceUrl,
+      sourcePageUrl: input.sourceUrl,
+      currentImage: currentImage ? mapManagedProductImageReference(currentImage) : undefined,
+    });
+
+    persistedImages.push(persistedImage.image);
+    imageWarnings.push(persistedImage.warning);
+  }
+
+  if (persistedImages.length > 0) {
     await db.insert(productImages).values(
-      input.imageUrls.map((url, index) => ({
+      persistedImages.map((image, index) => ({
         id: createId("image"),
         productId,
-        url,
-        alt: `${input.name} ${index + 1}`,
+        url: image.url,
+        ...(productImagesCompatibility.hasSourceUrl ? { sourceUrl: image.sourceUrl || image.url } : {}),
+        ...(productImagesCompatibility.hasProvider ? { provider: image.provider || null } : {}),
+        ...(productImagesCompatibility.hasAssetKey ? { assetKey: image.assetKey || null } : {}),
+        ...(productImagesCompatibility.hasCloudName ? { cloudName: image.cloudName || null } : {}),
+        alt: buildProductImageAlt({ productName: input.name, imageIndex: index + 1, totalImages: persistedImages.length }),
         position: index,
         source: input.sourceUrl && input.sourceUrl.includes("yupoo") ? ("yupoo" as const) : ("manual" as const),
       })),
     );
   }
+
+  const cleanupWarnings = await Promise.all(
+    currentImages.map(async (image) => {
+      const currentReference = mapManagedProductImageReference(image);
+      const nextImage = persistedImages.find(
+        (candidate) => candidate.sourceUrl === (image.sourceUrl ?? image.url) || candidate.assetKey === image.assetKey,
+      );
+
+      if (!nextImage || shouldCleanupPreviousManagedProductImage(currentReference, nextImage)) {
+        return cleanupManagedProductImage(currentReference);
+      }
+
+      return { warning: undefined as string | undefined };
+    }),
+  );
 
   if (input.sizes.length > 0) {
     await db.insert(productSizes).values(
@@ -465,6 +871,21 @@ export async function upsertProduct(input: AdminProductInput) {
         position: index,
       })),
     );
+  }
+
+  if (productSizeGuidesCompatibility.hasTable && normalizedSizeGuide) {
+    await db.insert(productSizeGuides).values({
+      id: createId("sizeguide"),
+      productId,
+      title: normalizedSizeGuide.title ?? "",
+      unitLabel: normalizedSizeGuide.unitLabel ?? "",
+      notes: normalizedSizeGuide.notes ?? "",
+      sourceImageUrl: normalizedSizeGuide.sourceImageUrl ?? null,
+      columns: normalizedSizeGuide.columns,
+      rows: normalizedSizeGuide.rows,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
   }
 
   if (input.variants.length > 0) {
@@ -478,7 +899,16 @@ export async function upsertProduct(input: AdminProductInput) {
     );
   }
 
-  return { id: productId, slug };
+  return {
+    id: productId,
+    slug,
+    warning: mergeWarnings(
+      ...imageWarnings,
+      ...cleanupWarnings.map((entry) => entry.warning),
+      getProductImagesSchemaCompatibilityWarning(productImagesCompatibility),
+      getProductSizeGuidesSchemaCompatibilityWarning(productSizeGuidesCompatibility),
+    ),
+  };
 }
 
 export async function deleteProduct(productId: string) {
@@ -488,7 +918,10 @@ export async function deleteProduct(productId: string) {
     throw new Error("DATABASE_URL is required to delete products.");
   }
 
+  const currentImages = await selectProductManagedImageStates(productId);
   await db.delete(products).where(eq(products.id, productId));
+
+  await Promise.all(currentImages.rows.map((image) => cleanupManagedProductImage(mapManagedProductImageReference(image))));
 }
 
 export async function updateProductState(productId: string, state: ProductState) {
@@ -559,11 +992,12 @@ export async function updateBrand(id: string, input: { name: string; imageUrl?: 
     throw new Error("No encontramos la marca que querés editar.");
   }
 
+  const currentImage = mapManagedBrandImageReference(currentBrand);
   const persistedImage = await persistManagedBrandImage({
     entity: "brands",
     sourceUrl: input.imageUrl,
     name: input.name,
-    currentImage: mapManagedBrandImageReference(currentBrand),
+    currentImage,
   });
 
   await db
@@ -580,9 +1014,13 @@ export async function updateBrand(id: string, input: { name: string; imageUrl?: 
     })
     .where(eq(brands.id, id));
 
+  const cleanup = shouldCleanupPreviousManagedBrandImage(currentImage, persistedImage)
+    ? await cleanupManagedBrandImage(currentImage)
+    : { warning: undefined as string | undefined };
+
   return {
     ...persistedImage,
-    warning: mergeWarnings(persistedImage.warning, getBrandSchemaCompatibilityWarning(compatibility)),
+    warning: mergeWarnings(persistedImage.warning, cleanup.warning, getBrandSchemaCompatibilityWarning(compatibility)),
   };
 }
 
@@ -603,10 +1041,11 @@ export async function deleteBrand(id: string) {
   }
 
   const currentBrand = await selectBrandManagedImageState(id);
-
-  const cleanup = await cleanupManagedBrandImage(currentBrand ? mapManagedBrandImageReference(currentBrand) : undefined);
+  const currentImage = currentBrand ? mapManagedBrandImageReference(currentBrand) : undefined;
 
   await db.delete(brands).where(eq(brands.id, id));
+
+  const cleanup = await cleanupManagedBrandImage(currentImage);
 
   return cleanup;
 }
@@ -747,8 +1186,9 @@ export async function getAdminProductById(productId: string) {
       availabilityNote: product.note,
       state: product.state ?? "published",
       sourceUrl: product.sourceUrl ?? "",
-      imageUrls: product.gallery.map((image) => image.src),
+      imageUrls: normalizeProductImageSourceUrls(product.sourceUrl, product.gallery.map((image) => image.src)),
       sizes: product.sizes?.map((size) => size.label) ?? [],
+      sizeGuide: product.sizeGuide,
       variants: product.variants?.map((variant) => variant.label) ?? [],
     };
   }
@@ -761,11 +1201,16 @@ export async function getAdminProductById(productId: string) {
     return null;
   }
 
-  const [imageRows, sizeRows, variantRows] = await Promise.all([
-    db.select().from(productImages).where(eq(productImages.productId, productId)).orderBy(asc(productImages.position)),
+  const productSizeGuidesCompatibility = await getProductSizeGuidesSchemaCompatibility();
+  const [productImageSelection, sizeRows, variantRows, sizeGuideRow] = await Promise.all([
+    selectProductManagedImageStates(productId),
     db.select().from(productSizes).where(eq(productSizes.productId, productId)).orderBy(asc(productSizes.position)),
     db.select().from(productVariants).where(eq(productVariants.productId, productId)).orderBy(asc(productVariants.position)),
+    productSizeGuidesCompatibility.hasTable
+      ? db.query.productSizeGuides.findFirst({ where: eq(productSizeGuides.productId, productId) })
+      : Promise.resolve(undefined),
   ]);
+  const imageRows = productImageSelection.rows;
 
   return {
     id: productRow.id,
@@ -778,8 +1223,12 @@ export async function getAdminProductById(productId: string) {
     availabilityNote: productRow.availabilityNote,
     state: productRow.state,
     sourceUrl: productRow.sourceUrl ?? "",
-    imageUrls: imageRows.map((image) => image.url),
+    imageUrls: normalizeProductImageSourceUrls(
+      productRow.sourceUrl ?? undefined,
+      imageRows.map((image) => image.sourceUrl ?? image.url),
+    ),
     sizes: sizeRows.map((size) => size.label),
+    sizeGuide: sizeGuideRow ? mapProductSizeGuide(sizeGuideRow as ProductSizeGuideRowCompat) : undefined,
     variants: variantRows.map((variant) => variant.label),
   };
 }

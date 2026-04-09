@@ -40,10 +40,6 @@ function getCustomerStatusLabel(status: CartCustomerProfile["customerStatus"]) {
 }
 
 function getFulfillmentLabel(fulfillment: CartCustomerProfile["fulfillment"]) {
-  if (fulfillment === "retiro") {
-    return "Retiro";
-  }
-
   if (fulfillment === "envio-caba-gba") {
     return "Envío CABA/GBA";
   }
@@ -57,7 +53,8 @@ function getFulfillmentLabel(fulfillment: CartCustomerProfile["fulfillment"]) {
 
 export function buildCartWhatsappMessage(items: CartItem[], customer: CartCustomerProfile) {
   const normalizedName = normalizeValue(customer.name);
-  const normalizedContact = normalizeValue(customer.contact);
+  const normalizedPhone = normalizeValue(customer.phone);
+  const normalizedEmail = normalizeValue(customer.email);
   const normalizedPreferredChannel = getPreferredChannelLabel(customer.preferredChannel);
   const normalizedCustomerStatus = getCustomerStatusLabel(customer.customerStatus);
   const normalizedFulfillment = getFulfillmentLabel(customer.fulfillment);
@@ -70,7 +67,8 @@ export function buildCartWhatsappMessage(items: CartItem[], customer: CartCustom
     ...items.map(buildCartItemDetail),
     "",
     `Nombre: ${normalizedName}`,
-    `Contacto: ${normalizedContact}`,
+    `Teléfono: ${normalizedPhone}`,
+    `Email: ${normalizedEmail}`,
     ...(normalizedPreferredChannel ? [`Canal preferido: ${normalizedPreferredChannel}`] : []),
     ...(normalizedCustomerStatus ? [`Tipo de cliente: ${normalizedCustomerStatus}`] : []),
     ...(normalizedFulfillment ? [`Entrega: ${normalizedFulfillment}`] : []),

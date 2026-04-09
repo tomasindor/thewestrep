@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 
 import { ProductDetailPage } from "@/components/catalog/product-detail-page";
 import { getCatalogProductById } from "@/lib/catalog";
-import { siteConfig } from "@/lib/site";
+import { createProductMetadata } from "@/lib/seo";
 
 interface StockProductPageProps {
   params: Promise<{ productId: string }>;
@@ -17,10 +17,7 @@ export async function generateMetadata({ params }: StockProductPageProps): Promi
     return {};
   }
 
-  return {
-    title: `${product.name} | ${siteConfig.title}`,
-    description: `${product.name} en stock inmediato en thewestrep con precio visible y atención por WhatsApp.`,
-  };
+  return createProductMetadata(product);
 }
 
 export default async function StockProductPage({ params }: StockProductPageProps) {

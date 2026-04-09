@@ -30,7 +30,7 @@ export function FaqAccordion({
             <span className="pr-2 text-base font-semibold text-white sm:text-lg">
               {item.question}
             </span>
-            <span className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/12 bg-white/6 text-lg leading-none text-orange-100 transition duration-200 group-open:rotate-45 group-open:border-orange-300/35 group-open:bg-orange-500/12">
+            <span className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/12 bg-white/6 text-lg leading-none text-[#f4d7e0] transition duration-200 group-open:rotate-45 group-open:border-[rgba(210,138,163,0.56)] group-open:bg-[rgba(210,138,163,0.14)]">
               +
             </span>
           </summary>

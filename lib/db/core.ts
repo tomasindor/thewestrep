@@ -31,3 +31,11 @@ export function getDbSql() {
 
   return sqlClientInstance;
 }
+
+export function requireDb() {
+  const db = getDb();
+  if (!db) {
+    throw new Error("Database not configured. Set DATABASE_URL in your environment.");
+  }
+  return db;
+}

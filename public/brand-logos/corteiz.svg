@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 360" role="img" aria-labelledby="title">
+  <title>Corteiz</title>
+  <rect width="1200" height="360" fill="none" />
+  <text
+    x="50%"
+    y="50%"
+    fill="#ffffff"
+    font-family="Arial, Helvetica, sans-serif"
+    font-size="118"
+    font-weight="700"
+    letter-spacing="20"
+    text-anchor="middle"
+    dominant-baseline="middle"
+  >
+    CORTEIZ
+  </text>
+</svg>

@@ -3,17 +3,23 @@ import { DefaultSession } from "next-auth";
 declare module "next-auth" {
   interface Session {
     user: DefaultSession["user"] & {
-      role: "admin";
+      id: string;
+      role: "admin" | "customer";
+      authProvider?: "credentials" | "google";
     };
   }
 
   interface User {
-    role?: "admin";
+    id?: string;
+    role?: "admin" | "customer";
+    authProvider?: "credentials" | "google";
   }
 }
 
 declare module "next-auth/jwt" {
   interface JWT {
-    role?: "admin";
+    customerId?: string;
+    role?: "admin" | "customer";
+    authProvider?: "credentials" | "google";
   }
 }

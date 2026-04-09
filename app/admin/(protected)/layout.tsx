@@ -2,7 +2,7 @@ import Link from "next/link";
 
 import { LogoutButton } from "@/components/admin/logout-button";
 import { requireAdminSession } from "@/lib/auth/session";
-import { navLinkClassName } from "@/lib/ui";
+import { eyebrowAccentClassName, navLinkClassName } from "@/lib/ui";
 
 const adminNavItems = [
   { href: "/admin/products", label: "Productos" },
@@ -18,7 +18,7 @@ export default async function AdminProtectedLayout({ children }: Readonly<{ chil
       <header className="sticky top-0 z-30 border-b border-white/8 bg-black/80 backdrop-blur-xl">
         <div className="mx-auto flex w-full max-w-7xl items-center justify-between gap-6 px-4 py-4 sm:px-6 lg:px-8">
           <div className="space-y-1">
-            <p className="text-xs font-medium tracking-[0.32em] text-orange-200/70 uppercase">thewestrep admin</p>
+            <p className={eyebrowAccentClassName}>thewestrep admin</p>
             <p className="text-sm text-slate-300">Backend V1 privado dentro del mismo sitio.</p>
           </div>
 

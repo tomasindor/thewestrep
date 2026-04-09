@@ -21,7 +21,7 @@ export default async function AdminCategoriesPage({ searchParams }: AdminCategor
   return (
     <section className="space-y-6">
       <div className="space-y-3">
-        <p className="text-xs font-medium tracking-[0.32em] text-orange-200/70 uppercase">Categorías</p>
+        <p className="text-xs font-medium tracking-[0.32em] text-[#f1d2dc]/70 uppercase">Categorías</p>
         <h1 className="font-display text-5xl text-white">CRUD de categorías</h1>
       </div>
 

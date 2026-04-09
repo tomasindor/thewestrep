@@ -21,7 +21,7 @@ export default async function AdminBrandsPage({ searchParams }: AdminBrandsPageP
   return (
     <section className="space-y-6">
       <div className="space-y-3">
-        <p className="text-xs font-medium tracking-[0.32em] text-orange-200/70 uppercase">Marcas</p>
+        <p className="text-xs font-medium tracking-[0.32em] text-[#f1d2dc]/70 uppercase">Marcas</p>
         <h1 className="font-display text-5xl text-white">CRUD de marcas</h1>
       </div>
 

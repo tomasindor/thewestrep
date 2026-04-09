@@ -1,98 +1,120 @@
 import Link from "next/link";
 
 import { SmartImage } from "@/components/ui/smart-image";
-import { getProductPath, type CatalogProduct } from "@/lib/catalog";
+import { getProductPath, type CatalogProduct } from "@/lib/catalog/models";
+import { getProductImageUrlForContext } from "@/lib/media/product-images";
 
-function getAvailabilityClassName(availability: CatalogProduct["availability"]) {
-  if (availability === "stock") {
-    return "border-emerald-400/25 bg-emerald-500/12 text-emerald-50";
-  }
-
-  return "border-orange-300/25 bg-orange-500/12 text-orange-50";
+function normalizeLabel(label: string) {
+  return label.trim().toLowerCase();
 }
 
-function getCommercialHighlights(product: CatalogProduct) {
-  const highlights = [product.note];
-
-  if (product.sizes?.length) {
-    highlights.push(`${product.sizes.length} ${product.sizes.length === 1 ? "talle" : "talles"}`);
+function isContextRedundantBadge(
+  badgeLabel: string,
+  productAvailability: CatalogProduct["availability"],
+  contextAvailability?: CatalogProduct["availability"],
+) {
+  if (!contextAvailability || contextAvailability !== productAvailability) {
+    return false;
   }
 
-  if (product.variants?.length) {
-    highlights.push(`${product.variants.length} ${product.variants.length === 1 ? "variante" : "variantes"}`);
+  const normalizedLabel = normalizeLabel(badgeLabel);
+
+  if (productAvailability === "stock") {
+    return normalizedLabel === "stock" || normalizedLabel === "stock inmediato";
   }
 
-  return highlights;
+  return normalizedLabel === "encargue" || normalizedLabel === "a pedido";
 }
 
 interface ProductCardProps {
   product: CatalogProduct;
-  variant?: "default" | "home";
+  variant?: "default" | "home" | "related";
+  contextAvailability?: CatalogProduct["availability"];
 }
 
-export function ProductCard({ product, variant = "default" }: ProductCardProps) {
+export function ProductCard({ product, variant = "default", contextAvailability }: ProductCardProps) {
   const detailHref = getProductPath(product);
   const isHomeCard = variant === "home";
-  const commercialHighlights = getCommercialHighlights(product);
+  const isRelatedCard = variant === "related";
+  const isCompactCard = isHomeCard || isRelatedCard;
+  const cardImage = product.gallery.find((image) => image.role === "cover") ?? product.gallery[0];
+  const showAvailabilityLabel = contextAvailability !== product.availability;
+  const visibleBadge =
+    product.badge && !isContextRedundantBadge(product.badge.label, product.availability, contextAvailability)
+      ? product.badge
+      : undefined;
+  const priceClassName = isCompactCard
+    ? "text-[#f4d7e0] drop-shadow-[0_10px_24px_rgba(210,138,163,0.18)]"
+    : "border-[rgba(210,138,163,0.2)] bg-[rgba(210,138,163,0.12)] text-[#f7e5eb] shadow-[0_10px_28px_rgba(210,138,163,0.14)]";
   const cardContent = (
     <>
-      <div className="relative aspect-[4/5] overflow-hidden border-b border-white/10 bg-black/20">
-        <SmartImage
-          src={product.image}
-          alt={product.alt}
-          fill
-          className="object-cover transition duration-700 group-hover:scale-105"
-          sizes="(max-width: 1280px) 50vw, 30vw"
-        />
-
-        <div className="absolute inset-x-0 top-0 flex items-start justify-between gap-3 p-4">
-          <span className="rounded-full border border-white/10 bg-black/45 px-3 py-1 text-[11px] font-medium tracking-[0.22em] text-white/72 uppercase backdrop-blur-sm">
-            {product.brand.name}
-          </span>
-          <div className="flex flex-wrap justify-end gap-2">
-            <span
-              className={`rounded-full border px-3 py-1 text-[11px] font-medium tracking-[0.18em] uppercase backdrop-blur-sm ${getAvailabilityClassName(product.availability)}`}
-            >
-              {product.availabilityLabel}
-            </span>
-            {product.badge ? (
-              <span className="rounded-full border border-orange-300/25 bg-orange-500/12 px-3 py-1 text-[11px] font-medium tracking-[0.18em] text-orange-50 uppercase backdrop-blur-sm">
-                {product.badge.label}
-              </span>
-            ) : null}
-          </div>
+      <div className="relative aspect-[4/5] overflow-hidden bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.1),transparent_42%),linear-gradient(180deg,rgba(7,9,14,0.08),rgba(7,9,14,0.34))]">
+        <div className="absolute -inset-px overflow-hidden">
+          <SmartImage
+            src={cardImage ? getProductImageUrlForContext(cardImage, "card") : product.image}
+            alt={cardImage?.alt ?? product.alt}
+            fill
+            className="h-full w-full object-cover transform-gpu transition duration-700 will-change-transform group-hover:scale-[1.04]"
+            sizes="(max-width: 768px) 100vw, (max-width: 1024px) 50vw, (max-width: 1280px) 33vw, (max-width: 1536px) 20vw, 18vw"
+          />
         </div>
+        <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgba(4,5,8,0.02)_0%,rgba(4,5,8,0.14)_48%,rgba(4,5,8,0.62)_100%)]" />
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-[radial-gradient(circle_at_bottom,rgba(210,138,163,0.16),transparent_62%)] opacity-70 transition duration-300 group-hover:opacity-100" />
+
+        {!isCompactCard ? (
+          <div className="absolute inset-x-0 top-0 flex justify-end p-4">
+            <div className="flex flex-wrap justify-end gap-2">
+              {showAvailabilityLabel ? (
+                <span
+                  className={`rounded-full border px-3 py-1 text-[11px] font-medium tracking-[0.18em] uppercase backdrop-blur-sm ${
+                    product.availability === "stock"
+                      ? "border-emerald-400/25 bg-emerald-500/12 text-emerald-50"
+                      : "border-[rgba(210,138,163,0.28)] bg-[rgba(210,138,163,0.12)] text-[#f6dbe4]"
+                  }`}
+                >
+                  {product.availabilityLabel}
+                </span>
+              ) : null}
+              {visibleBadge ? (
+                <span className="rounded-full border border-[rgba(210,138,163,0.3)] bg-[rgba(14,10,14,0.58)] px-3 py-1 text-[11px] font-medium tracking-[0.18em] text-[#f6dbe4] uppercase shadow-[0_10px_26px_rgba(0,0,0,0.18)] backdrop-blur-sm">
+                  {visibleBadge.label}
+                </span>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
       </div>
 
-      <div className="space-y-4 p-5 sm:p-6">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <span className="rounded-full border border-white/10 bg-white/6 px-3 py-1 text-xs text-white/75">
-            {product.category.name}
-          </span>
-          <p className="text-xl font-semibold text-orange-100 sm:text-2xl">{product.pricing.display}</p>
-        </div>
-
-        <div className="space-y-2.5">
-          <h3 className="text-xl font-semibold leading-tight text-white sm:text-2xl">{product.name}</h3>
-          <p className="line-clamp-2 text-sm leading-6 text-slate-300">{product.detail}</p>
-        </div>
-
-        <div className="flex flex-wrap gap-2">
-          {commercialHighlights.map((highlight) => (
-            <span
-              key={highlight}
-              className="rounded-full border border-white/10 bg-black/20 px-3 py-1 text-[11px] tracking-[0.18em] text-white/72 uppercase"
-            >
-              {highlight}
+      <div className="flex flex-1 flex-col p-5 sm:p-6">
+        <div className="flex flex-1 flex-col gap-4">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-[11px] font-medium tracking-[0.24em] text-white/68 uppercase">
+            <span className="text-[#f2d4dd]/90">{product.brand.name}</span>
+            <span aria-hidden="true" className="text-white/25">
+              /
             </span>
-          ))}
-        </div>
+            <span>{product.category.name}</span>
+          </div>
 
-        <div className="flex items-center justify-between gap-3 text-sm font-medium text-orange-100">
-          <span>{isHomeCard ? "Ver producto" : "Abrir detalle"}</span>
-          <span aria-hidden="true" className="text-lg transition-transform duration-300 group-hover:translate-x-1">
-            →
-          </span>
+          {isCompactCard ? (
+            <div className="flex flex-1 flex-col gap-2.5">
+              <h3 className="text-[1.75rem] font-semibold leading-[1.02] tracking-tight text-white sm:text-[2rem]">{product.name}</h3>
+              <p className={`mt-auto text-2xl font-semibold tracking-tight sm:text-[1.8rem] ${priceClassName}`}>
+                {product.pricing.display}
+              </p>
+            </div>
+          ) : (
+            <div className="flex flex-1 flex-col gap-3">
+              <h3 className="line-clamp-2 text-[1.2rem] font-semibold leading-[1.08] tracking-tight text-white sm:text-[1.3rem]">
+                {product.name}
+              </h3>
+              <p className="line-clamp-3 text-[13px] leading-5 text-slate-300/95">{product.detail}</p>
+              <p
+                className={`mt-auto inline-flex w-fit rounded-full border px-2.5 py-1 text-[1rem] font-semibold tracking-tight sm:text-[1.05rem] ${priceClassName}`}
+              >
+                {product.pricing.display}
+              </p>
+            </div>
+          )}
         </div>
       </div>
     </>
@@ -102,7 +124,7 @@ export function ProductCard({ product, variant = "default" }: ProductCardProps) 
     <Link
       href={detailHref}
       aria-label={`Ver detalle de ${product.name}`}
-      className="group block overflow-hidden rounded-[1.75rem] border border-white/10 bg-white/[0.03] transition duration-300 hover:-translate-y-1 hover:border-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-200/80 focus-visible:ring-offset-2 focus-visible:ring-offset-black"
+      className="group flex h-full flex-col overflow-hidden rounded-[1.8rem] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.055),rgba(255,255,255,0.02))] shadow-[0_20px_48px_rgba(0,0,0,0.2)] transition duration-300 hover:-translate-y-1.5 hover:border-[rgba(210,138,163,0.24)] hover:shadow-[0_30px_82px_rgba(0,0,0,0.34)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(210,138,163,0.72)] focus-visible:ring-offset-2 focus-visible:ring-offset-black"
     >
       {cardContent}
     </Link>
