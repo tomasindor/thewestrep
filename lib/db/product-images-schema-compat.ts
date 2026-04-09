@@ -9,6 +9,7 @@ export interface ProductImagesSchemaCompatibility {
   hasProvider: boolean;
   hasAssetKey: boolean;
   hasCloudName: boolean;
+  hasVariantsManifest: boolean;
 }
 
 function normalizeSqlRows<T>(result: unknown): T[] {
@@ -37,6 +38,7 @@ export const getProductImagesSchemaCompatibility = cache(
         hasProvider: true,
         hasAssetKey: true,
         hasCloudName: true,
+        hasVariantsManifest: true,
       };
     }
 
@@ -51,6 +53,7 @@ export const getProductImagesSchemaCompatibility = cache(
       hasProvider: columns.has("provider"),
       hasAssetKey: columns.has("asset_key"),
       hasCloudName: columns.has("cloud_name"),
+      hasVariantsManifest: columns.has("variants_manifest"),
     };
   },
 );
@@ -61,6 +64,7 @@ export function getProductImagesSchemaCompatibilityWarning(compatibility: Produc
     compatibility.hasProvider ? null : "provider",
     compatibility.hasAssetKey ? null : "asset_key",
     compatibility.hasCloudName ? null : "cloud_name",
+    compatibility.hasVariantsManifest ? null : "variants_manifest",
   ].filter((column): column is string => Boolean(column));
 
   if (missingColumns.length === 0) {

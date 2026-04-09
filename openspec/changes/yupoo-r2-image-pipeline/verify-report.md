@@ -3,7 +3,7 @@
 **Change**: yupoo-r2-image-pipeline
 **Version**: N/A
 **Mode**: Strict TDD
-**Scope**: Recent Phase 1 variant contract correction only (`lib/media/variants.ts`, `tests/unit/media-variants.test.ts`)
+**Scope**: Phase 2 schema foundation state-alignment slice (`pending`, `approved`, `rejected`)
 
 ---
 
@@ -11,12 +11,12 @@
 | Metric | Value |
 |--------|-------|
 | Tasks total | 34 |
-| Tasks complete | 4 |
-| Tasks incomplete | 30 |
+| Tasks complete | 9 |
+| Tasks incomplete | 25 |
 
-Scoped note: the broader change is still incomplete, but the requested verification was limited to the recent Phase 1 variant contract correction.
+Scoped note: this verification covers the recent Phase 2 schema slice only (tasks 2.1-2.4 behaviorally, 2.5 artifact review only). The broader change remains incomplete across Phases 3-7.
 
-Incomplete tasks outside this scoped correction remain in Phases 2-7.
+Incomplete tasks outside this scoped verification remain in Phases 3-7.
 
 ---
 
@@ -24,30 +24,27 @@ Incomplete tasks outside this scoped correction remain in Phases 2-7.
 
 **Build**: ➖ Not run
 ```text
-Skipped intentionally. User requested relevant unit tests only, and project guidance says never build after changes.
+Skipped intentionally. User requested only the relevant unit test(s), and project guidance says never build after changes.
 ```
 
-**Tests**: ✅ 5 passed / ❌ 0 failed / ⚠️ 0 skipped
+**Tests**: ✅ 4 passed / ❌ 0 failed / ⚠️ 0 skipped
 ```text
-Command: node --import ./tests/node-test-register.mjs --test "tests/unit/media-variants.test.ts"
+Command: node --import ./tests/node-test-register.mjs --test "tests/unit/import-schema-foundation.test.ts"
 
-✔ uses the fixed variant widths defined by the PDR
-✔ declares exactly the six fixed variants required by spec
-✔ generates six webp variants and preserves original dimensions
-✔ does not upscale tiny source images while generating variant metadata
-✔ resizes larger images to the target widths while preserving aspect ratio
+✔ schema exports staging import tables for jobs, items, and images
+✔ schema exports import enums with required states
+✔ product images schema compatibility warns when variants_manifest column is missing
+✔ product images schema compatibility does not warn when all managed columns exist
 
-tests 5
-pass 5
+tests 4
+pass 4
 fail 0
 skipped 0
 ```
 
-**Coverage**: 96.26% lines / 75.00% branches for `lib/media/variants.ts` → ✅ Strong line coverage
+**Coverage**: ➖ Not run
 ```text
-Command: node --import ./tests/node-test-register.mjs --experimental-test-coverage --test "tests/unit/media-variants.test.ts"
-
-lib/media/variants.ts | 96.26 | 75.00 | 100.00 | 56-57 74-75
+Skipped intentionally to respect the user-requested scope of running only the relevant unit test(s).
 ```
 
 ---
@@ -55,39 +52,36 @@ lib/media/variants.ts | 96.26 | 75.00 | 100.00 | 56-57 74-75
 ### TDD Compliance
 | Check | Result | Details |
 |-------|--------|---------|
-| TDD Evidence reported | ❌ | No `openspec/changes/yupoo-r2-image-pipeline/apply-progress.md` artifact was present |
-| All tasks have tests | ✅ | Relevant variant contract has `tests/unit/media-variants.test.ts` |
-| RED confirmed (tests exist) | ✅ | Test file exists and exercises the corrected contract |
-| GREEN confirmed (tests pass) | ✅ | 5/5 scoped tests pass on execution |
-| Triangulation adequate | ✅ | Contract covered by fixed-width, exact-variant, no-upscale, and resize cases |
-| Safety Net for modified files | ⚠️ | Could not verify from apply-progress because the artifact is missing |
+| TDD Evidence reported | ✅ | `openspec/changes/yupoo-r2-image-pipeline/apply-progress.md` includes Phase 2 rows for tasks 2.1-2.5 |
+| All tasks have tests | ⚠️ | 4/5 scoped tasks have a test file; task 2.5 is a migration execution task, not unit-testable in this run |
+| RED confirmed (tests exist) | ✅ | `tests/unit/import-schema-foundation.test.ts` exists and covers the Phase 2 schema slice |
+| GREEN confirmed (tests pass) | ✅ | 4/4 scoped tests pass on execution |
+| Triangulation adequate | ✅ | Separate assertions cover schema exports, enum values, missing-column warning, and full-compatibility path |
+| Safety Net for modified files | ⚠️ | Apply-progress records no pre-existing targeted schema tests for this area |
 
-**TDD Compliance**: 4/6 checks passed
+**TDD Compliance**: 4/6 checks passed cleanly, 2/6 with warnings
 
 ---
 
 ### Test Layer Distribution
 | Layer | Tests | Files | Tools |
 |-------|-------|-------|-------|
-| Unit | 5 | 1 | node:test + assert |
-| Integration | 0 | 0 | not installed for this scope |
+| Unit | 4 | 1 | node:test + assert |
+| Integration | 0 | 0 | not available in this scoped run |
 | E2E | 0 | 0 | Playwright available but not relevant to this scope |
-| **Total** | **5** | **1** | |
+| **Total** | **4** | **1** | |
 
 ---
 
 ### Changed File Coverage
-| File | Line % | Branch % | Uncovered Lines | Rating |
-|------|--------|----------|-----------------|--------|
-| `lib/media/variants.ts` | 96.26% | 75.00% | L56-L57, L74-L75 | ✅ Excellent |
 
-**Average changed file coverage**: 96.26%
+Coverage analysis skipped — user explicitly requested running only the relevant unit test(s).
 
 ---
 
 ### Assertion Quality
 
-**Assertion quality**: ✅ All assertions verify real behavior
+**Assertion quality**: ✅ All assertions verify real behavior for this scoped schema slice
 
 ---
 
@@ -99,52 +93,51 @@ lib/media/variants.ts | 96.26 | 75.00 | 100.00 | 56-57 74-75
 
 | Requirement | Scenario | Test | Result |
 |-------------|----------|------|--------|
-| R2: Image Storage & Variants | Six fixed variants are declared exactly once | `tests/unit/media-variants.test.ts > declares exactly the six fixed variants required by spec` | ✅ COMPLIANT |
-| R2: Image Storage & Variants | Fixed variant widths match the corrected contract | `tests/unit/media-variants.test.ts > uses the fixed variant widths defined by the PDR` | ✅ COMPLIANT |
-| R2: Image Storage & Variants | Variant generation emits six webp assets and preserves original dimensions | `tests/unit/media-variants.test.ts > generates six webp variants and preserves original dimensions` | ✅ COMPLIANT |
-| R2: Image Storage & Variants | Tiny source images are not upscaled | `tests/unit/media-variants.test.ts > does not upscale tiny source images while generating variant metadata` | ✅ COMPLIANT |
-| R2: Image Storage & Variants | Larger source images resize to target widths while preserving aspect ratio | `tests/unit/media-variants.test.ts > resizes larger images to the target widths while preserving aspect ratio` | ✅ COMPLIANT |
-| S1/S2 step 4 | Generate and store all six variants in R2 | Unit coverage proves generation contract only; storage is not implemented in this scoped slice | ⚠️ PARTIAL |
+| Phase 2 / Schema foundation | Staging schema exports import job, item, and image tables with required columns | `tests/unit/import-schema-foundation.test.ts > schema exports staging import tables for jobs, items, and images` | ✅ COMPLIANT |
+| PDR state alignment | Import item status enum is limited to `pending`, `approved`, `rejected` | `tests/unit/import-schema-foundation.test.ts > schema exports import enums with required states` | ✅ COMPLIANT |
+| PDR state alignment | Import image review state enum is limited to `pending`, `approved`, `rejected` | `tests/unit/import-schema-foundation.test.ts > schema exports import enums with required states` | ✅ COMPLIANT |
+| Product image compatibility | Missing `variants_manifest` column emits compatibility warning | `tests/unit/import-schema-foundation.test.ts > product images schema compatibility warns when variants_manifest column is missing` | ✅ COMPLIANT |
+| Product image compatibility | Full managed-image compatibility emits no warning | `tests/unit/import-schema-foundation.test.ts > product images schema compatibility does not warn when all managed columns exist` | ✅ COMPLIANT |
 
-**Compliance summary**: 5/6 scoped scenarios compliant
+**Compliance summary**: 5/5 scoped scenarios compliant
 
 ---
 
 ### Correctness (Static — Structural Evidence)
 | Requirement | Status | Notes |
 |------------|--------|-------|
-| R2 fixed six variants | ✅ Implemented | `lib/media/variants.ts` defines exactly six variant names with corrected widths |
-| Manifest field compatibility | ✅ Implemented | `mapVariantNameToManifestField()` aligns dashed names with `lib/types/media.ts` camelCase fields |
-| Variant metadata persistence alongside image records | ⚠️ Partial | Manifest type exists, but Phase 2 persistence/schema work is still incomplete |
+| Staging schema foundation exists | ✅ Implemented | `lib/db/schema.ts` defines `import_jobs`, `import_items`, `import_images` plus relations and inferred record types |
+| PDR-aligned import states | ✅ Implemented | `importItemsStatusEnum` and `importImagesReviewStateEnum` both expose only `pending`, `approved`, `rejected` |
+| Catalog image manifest compatibility | ✅ Implemented | `product_images` adds `variants_manifest`; repository select/insert compatibility includes `hasVariantsManifest` handling |
+| Artifact/docs alignment with implemented state model | ⚠️ Partial | `openspec/changes/yupoo-r2-image-pipeline/spec.md`, `openspec/specs/yupoo-r2-image-pipeline.md`, and `design.md` still reference stale states/contracts (`restored`, `promoted`, `active`, old staging table naming) |
 
 ---
 
 ### Coherence (Design)
 | Decision | Followed? | Notes |
 |----------|-----------|-------|
-| Predictable key generation for stored variants | ✅ Yes | `buildVariantKey()` uses deterministic `{original-without-ext}/{variant}.webp` keys |
-| Manifest-backed variant contract | ✅ Yes | Implementation aligns with `ImageVariantsManifest` in `lib/types/media.ts` |
-| Design interface naming stays consistent with implementation | ⚠️ Deviated | `openspec/changes/yupoo-r2-image-pipeline/design.md` still lists `square/small/medium/large/xlarge/blurhash`, not the implemented six variant names |
+| Introduce dedicated staging schema | ✅ Yes | `lib/db/schema.ts` adds separate staging tables instead of polluting `product_images` with review workflow state |
+| Store variant manifest in JSONB alongside image records | ✅ Yes | `variants_manifest` is present on both `import_images` and `product_images`, with repository compatibility handling |
+| State contract documented in design/specs matches implementation | ⚠️ Deviated | Implementation is aligned to the PDR, but current OpenSpec docs still describe stale extra states and older table naming |
 
 ---
 
 ### Issues Found
 
 **CRITICAL** (must fix before archive):
-- Strict TDD evidence artifact is missing for this change (`apply-progress.md` not found), so process compliance cannot be fully verified.
+- None in the scoped Phase 2 code/test slice.
 
 **WARNING** (should fix):
-- `openspec/changes/yupoo-r2-image-pipeline/design.md` still carries stale variant names that conflict with the implemented contract.
-- `openspec/changes/yupoo-r2-image-pipeline/tasks.md` still leaves test task 7.2 unchecked even though `tests/unit/media-variants.test.ts` exists and passes.
-- Coverage misses defensive branches in `lib/media/variants.ts` at L56-L57 and L74-L75.
-- Node emitted a `[MODULE_TYPELESS_PACKAGE_JSON]` warning while running the test file.
+- OpenSpec artifacts are out of sync with the implemented/PDR-aligned state model: `openspec/changes/yupoo-r2-image-pipeline/spec.md`, `openspec/specs/yupoo-r2-image-pipeline.md`, and `openspec/changes/yupoo-r2-image-pipeline/design.md` still mention stale states/contracts.
+- Task 2.5 (migration execution) was not re-executed in this verification because the user requested only relevant unit test(s); this run validates schema code and targeted unit behavior, not live database application.
+- Node emitted a `[MODULE_TYPELESS_PACKAGE_JSON]` warning during the unit test run.
 
 **SUGGESTION** (nice to have):
-- Add one negative-path unit test covering undetectable source dimensions / invalid input so the remaining defensive branches are exercised.
+- Add a follow-up schema-level verification artifact for the actual applied database enum/table state once migration verification is requested.
 
 ---
 
 ### Verdict
 PASS WITH WARNINGS
 
-The Phase 1 variant contract correction is behaviorally verified for the scoped unit-test slice: the updated variant spec/tests pass, but strict-TDD evidence and design/task documentation are not fully in sync yet.
+The Phase 2 schema foundation state-alignment slice is behaviorally verified for the requested unit-test scope: the relevant Node unit test passes and the code now exposes only `pending`, `approved`, and `rejected`, but the OpenSpec artifacts still lag behind the implemented/PDR-aligned contract.

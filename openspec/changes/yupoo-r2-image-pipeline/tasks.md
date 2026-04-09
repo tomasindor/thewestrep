@@ -7,11 +7,11 @@
 - [x] 1.4 Define `ImageVariantsManifest` interface in `lib/types/media.ts`
 
 ## Phase 2: Schema / Data Layer
-- [ ] 2.1 Add `import_jobs` table to `lib/db/schema.ts` (id, status, source, sourceReference, createdAt, updatedAt)
-- [ ] 2.2 Add `import_items` table to `lib/db/schema.ts` (id, importJobId, status, productData, createdAt, updatedAt)
-- [ ] 2.3 Add `import_images` table to `lib/db/schema.ts` (id, importItemId, originalUrl, r2Key, variantsManifest JSONB, order, reviewState, isSizeGuide, similarityMetadata, createdAt, updatedAt)
-- [ ] 2.4 Add `variants_manifest` JSONB column to `product_images` table for catalog images
-- [ ] 2.5 Run database migration to create staging tables
+- [x] 2.1 Add `import_jobs` table to `lib/db/schema.ts` (id, status, source, sourceReference, createdAt, updatedAt)
+- [x] 2.2 Add `import_items` table to `lib/db/schema.ts` (id, importJobId, status, productData, createdAt, updatedAt)
+- [x] 2.3 Add `import_images` table to `lib/db/schema.ts` (id, importItemId, originalUrl, r2Key, variantsManifest JSONB, order, reviewState, isSizeGuide, similarityMetadata, createdAt, updatedAt)
+- [x] 2.4 Add `variants_manifest` JSONB column to `product_images` table for catalog images
+- [x] 2.5 Run database migration to create staging tables
 
 ## Phase 3: Core Implementation - Ingestion
 - [ ] 3.1 Create `lib/imports/ingestion.ts` shared service with: parseYupooUrl, downloadImage, generateVariants, storeInR2, createStagingRecords

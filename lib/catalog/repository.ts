@@ -37,6 +37,7 @@ import type {
   Product,
   ProductAvailability,
   ProductAvailabilityInfo,
+  ProductImage,
   ProductSizeGuide,
   ProductSize,
   ProductState,
@@ -249,10 +250,19 @@ interface ProductImageRowCompat {
   provider: string | null;
   assetKey: string | null;
   cloudName: string | null;
+  variantsManifest: unknown;
   alt: string;
   position: number;
   source: "manual" | "yupoo";
   createdAt: Date;
+}
+
+function normalizeVariantsManifest(value: unknown) {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  return value as ProductImage["variantsManifest"];
 }
 
 interface ProductSizeGuideRowCompat {
@@ -426,6 +436,7 @@ async function selectProductImageRows() {
   const providerSelection = compatibility.hasProvider ? "provider" : "null::text";
   const assetKeySelection = compatibility.hasAssetKey ? "asset_key" : "null::text";
   const cloudNameSelection = compatibility.hasCloudName ? "cloud_name" : "null::text";
+  const variantsManifestSelection = compatibility.hasVariantsManifest ? "variants_manifest" : "null::jsonb";
   const result = await sqlClient.query(`
     select
       id,
@@ -435,6 +446,7 @@ async function selectProductImageRows() {
       ${providerSelection} as provider,
       ${assetKeySelection} as "assetKey",
       ${cloudNameSelection} as "cloudName",
+      ${variantsManifestSelection} as "variantsManifest",
       alt,
       position,
       source,
@@ -464,6 +476,7 @@ async function selectProductManagedImageStates(productId: string) {
   const providerSelection = compatibility.hasProvider ? "provider" : "null::text";
   const assetKeySelection = compatibility.hasAssetKey ? "asset_key" : "null::text";
   const cloudNameSelection = compatibility.hasCloudName ? "cloud_name" : "null::text";
+  const variantsManifestSelection = compatibility.hasVariantsManifest ? "variants_manifest" : "null::jsonb";
   const result = await sqlClient.query(
     `
       select
@@ -474,6 +487,7 @@ async function selectProductManagedImageStates(productId: string) {
         ${providerSelection} as provider,
         ${assetKeySelection} as "assetKey",
         ${cloudNameSelection} as "cloudName",
+        ${variantsManifestSelection} as "variantsManifest",
         alt,
         position,
         source,
@@ -607,6 +621,7 @@ const loadDatabaseCatalog = cache(async function loadDatabaseCatalog() {
                 provider: parseManagedProductImageProvider(image.provider) ?? undefined,
                 assetKey: image.assetKey ?? undefined,
                 cloudName: image.cloudName ?? getCloudinaryConfig()?.cloudName ?? undefined,
+                variantsManifest: normalizeVariantsManifest(image.variantsManifest),
               }))
             : [
                 {
@@ -840,6 +855,7 @@ export async function upsertProduct(input: AdminProductInput) {
         ...(productImagesCompatibility.hasProvider ? { provider: image.provider || null } : {}),
         ...(productImagesCompatibility.hasAssetKey ? { assetKey: image.assetKey || null } : {}),
         ...(productImagesCompatibility.hasCloudName ? { cloudName: image.cloudName || null } : {}),
+        ...(productImagesCompatibility.hasVariantsManifest ? { variantsManifest: null } : {}),
         alt: buildProductImageAlt({ productName: input.name, imageIndex: index + 1, totalImages: persistedImages.length }),
         position: index,
         source: input.sourceUrl && input.sourceUrl.includes("yupoo") ? ("yupoo" as const) : ("manual" as const),
