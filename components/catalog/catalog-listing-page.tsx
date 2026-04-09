@@ -3,7 +3,8 @@ import Link from "next/link";
 
 import { CatalogFilters } from "@/components/catalog/catalog-filters";
 import { CatalogHeader } from "@/components/catalog/catalog-header";
-import { ProductGrid } from "@/components/catalog/product-grid";
+import { InfiniteProductGrid } from "@/components/catalog/infinite-product-grid";
+import { PublicFooter } from "@/components/layout/public-footer";
 import { Container } from "@/components/ui/container";
 import {
   getCatalogFilterGroups,
@@ -12,8 +13,9 @@ import {
   getCatalogProducts,
   type ProductAvailability,
 } from "@/lib/catalog";
+import { createPageMetadata } from "@/lib/seo";
 import { siteConfig } from "@/lib/site";
-import { compactGhostCtaClassName, ghostCtaClassName, solidCtaClassName } from "@/lib/ui";
+import { compactGhostCtaClassName } from "@/lib/ui";
 
 const listingContent: Record<
   ProductAvailability,
@@ -24,7 +26,6 @@ const listingContent: Record<
     heading: string;
     intro: string;
     statsCopy: string;
-    ctaMessage: string;
     emptyTitle: string;
     emptyDescription: string;
   }
@@ -36,20 +37,19 @@ const listingContent: Record<
     heading: "STOCK LISTO PARA ELEGIR Y CERRAR.",
     intro: "Entrá por marca, prenda y precio sin vueltas.",
     statsCopy: "Selección local lista para entrega coordinada o retiro según disponibilidad.",
-    ctaMessage: "Hola, quiero consultar el stock inmediato disponible en thewestrep.",
     emptyTitle: "No hay stock para esta categoría.",
-    emptyDescription: "Probá otra categoría o limpiá el filtro para volver a ver todo el stock disponible.",
+    emptyDescription: "Probá otra búsqueda, cambiá el orden o limpiá los filtros para volver a ver todo el stock disponible.",
   },
   encargue: {
-    title: `Encargue internacional | ${siteConfig.title}`,
-    description: "Catálogo de encargues internacionales de thewestrep para elegir el producto y avanzar la compra con una referencia clara.",
-    eyebrow: "Encargue internacional",
-    heading: "ELEGÍ EN EL CATÁLOGO Y AVANZÁ EL ENCARGUE.",
-    intro: "Filtrá por marca o prenda, encontrá el producto y seguí la consulta con esa referencia.",
-    statsCopy: "Selección pensada para elegir desde catálogo y coordinar el paso siguiente por WhatsApp.",
-    ctaMessage: "Hola, quiero cotizar un producto por encargue en thewestrep.",
+    title: `Encargue internacional asistido | ${siteConfig.title}`,
+    description: "Catálogo de encargue internacional asistido de thewestrep para elegir el producto y avanzar con un proceso simple sin trámites.",
+    eyebrow: "Encargue internacional asistido",
+    heading: "ELEGÍ EL PRODUCTO Y AVANZÁ SIN TRÁMITES.",
+    intro:
+      "Filtrá por marca o prenda, encontrá tu referencia y seguimos con un encargue internacional asistido donde nosotros hacemos la importación y despachamos localmente.",
+    statsCopy: "Selección pensada para que encarguemos la importación y luego despachamos localmente desde Argentina.",
     emptyTitle: "No hay encargues para esta categoría.",
-    emptyDescription: "Probá otra categoría o limpiá el filtro para volver a ver todos los encargues disponibles.",
+    emptyDescription: "Probá otra búsqueda, cambiá el orden o limpiá los filtros para volver a ver todos los encargues disponibles.",
   },
 };
 
@@ -61,10 +61,12 @@ interface CatalogListingPageProps {
 export function getCatalogListingMetadata(availability: ProductAvailability): Metadata {
   const content = listingContent[availability];
 
-  return {
-    title: content.title,
+  return createPageMetadata({
+    title: content.title.replace(` | ${siteConfig.title}`, ""),
     description: content.description,
-  };
+    path: availability === "stock" ? "/stock" : "/encargue",
+    keywords: [content.eyebrow, "catálogo", availability],
+  });
 }
 
 export async function CatalogListingPage({ availability, searchParams }: CatalogListingPageProps) {
@@ -75,20 +77,27 @@ export async function CatalogListingPage({ availability, searchParams }: Catalog
   const [products, totalProducts, filterGroups] = await Promise.all([
     getCatalogProducts(filters),
     getCatalogProducts(baseFilters),
-    getCatalogFilterGroups(baseFilters),
+    getCatalogFilterGroups(filters),
   ]);
   const basePath = getCatalogPath(availability);
+  const gridKey = [
+    availability,
+    activeFilters.brandId ?? "all-brands",
+    activeFilters.categoryId ?? "all-categories",
+    activeFilters.query ?? "all-products",
+    activeFilters.sort ?? "alpha-asc",
+  ].join(":");
 
   return (
     <main className="flex-1">
       <div className="relative isolate">
-        <CatalogHeader whatsappMessage={content.ctaMessage} ctaLabel="WhatsApp catálogo" />
+        <CatalogHeader />
 
         <section className="py-12 sm:py-18">
           <Container className="space-y-8">
             <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
               <div className="space-y-4">
-                <p className="font-display text-sm tracking-[0.45em] text-orange-100/75 uppercase">
+                <p className="font-display text-sm tracking-[0.45em] text-[#f2d4dd]/78 uppercase">
                   {content.eyebrow}
                 </p>
                 <h1 className="font-display max-w-4xl text-5xl leading-[0.9] text-white sm:text-7xl">
@@ -99,18 +108,10 @@ export async function CatalogListingPage({ availability, searchParams }: Catalog
                 </p>
               </div>
 
-              <div className="flex flex-col gap-3 sm:flex-row sm:gap-4 lg:min-w-[20rem] lg:justify-end">
-                <a
-                  href={`${siteConfig.whatsappUrl}${encodeURIComponent(content.ctaMessage)}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className={solidCtaClassName}
-                >
-                  Consultar catálogo por WhatsApp
-                </a>
+              <div className="flex flex-wrap items-center gap-3 lg:justify-end">
                 <Link
                   href="/catalogo"
-                  className={ghostCtaClassName}
+                  className={`${compactGhostCtaClassName} px-5`}
                 >
                   Ver ambos catálogos
                 </Link>
@@ -134,7 +135,7 @@ export async function CatalogListingPage({ availability, searchParams }: Catalog
 
         <Container>
           <CatalogFilters
-            basePath={basePath}
+            availability={availability}
             filterGroups={filterGroups}
             activeFilters={activeFilters}
             totalProducts={totalProducts.length}
@@ -145,11 +146,15 @@ export async function CatalogListingPage({ availability, searchParams }: Catalog
         <section className="py-8 sm:py-10">
           <Container className="space-y-8">
             {products.length > 0 ? (
-              <ProductGrid products={products} />
+              <InfiniteProductGrid
+                key={gridKey}
+                products={products}
+                contextAvailability={availability}
+              />
             ) : (
               <div className="flex flex-col items-start gap-4 rounded-[1.75rem] border border-dashed border-white/12 bg-white/[0.03] p-6 sm:p-8">
                 <div className="space-y-2">
-                  <p className="text-xs font-medium tracking-[0.3em] text-orange-200/75 uppercase">
+                  <p className="text-xs font-medium tracking-[0.3em] text-[#f1d2dc]/75 uppercase">
                     Sin resultados
                   </p>
                   <h3 className="font-display text-3xl leading-none text-white sm:text-4xl">
@@ -162,6 +167,7 @@ export async function CatalogListingPage({ availability, searchParams }: Catalog
 
                 <Link
                   href={basePath}
+                  scroll={false}
                   className={compactGhostCtaClassName}
                 >
                   Ver todo
@@ -170,6 +176,8 @@ export async function CatalogListingPage({ availability, searchParams }: Catalog
             )}
           </Container>
         </section>
+
+        <PublicFooter />
       </div>
     </main>
   );

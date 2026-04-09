@@ -99,6 +99,32 @@ public/             Static assets
 scripts/            Optional utilities such as DB seeding
 ```
 
+## Brand logo white variants
+
+For simple monochrome SVG logos, you can generate a colocated `-white.svg` variant and the app will prefer it automatically when the brand image points to a local SVG.
+
+```bash
+npm run logos:white -- public/path/to/logo.svg
+```
+
+Useful options:
+
+- `--check`: validate what the script would generate without writing files.
+- `--force`: overwrite an existing `-white.svg` file.
+- No explicit path: scans `public/` recursively.
+
+Example:
+
+```text
+public/brands/nike.svg -> public/brands/nike-white.svg
+```
+
+Notes:
+
+- The transformer is intentionally conservative. It targets simple black SVGs only.
+- SVGs with gradients, embedded raster images, masks, complex style-driven colors, or other unsupported constructs are skipped with a reason.
+- App fallback behavior is: use `logo-white.svg` when it exists, otherwise keep `logo.svg`.
+
 ## GitHub push steps
 
 Create the remote repo first, then run:
@@ -130,6 +156,15 @@ vercel
 - Extraction is best-effort HTML scraping only.
 - Yupoo can change markup, hotlinking rules, or bot protections without warning.
 - If extraction fails, keep the Yupoo source URL for reference and paste image URLs manually in the admin form.
+
+## Product media flow
+
+- Admin extraction canonicalizes Yupoo variants so `small` / `big` / `original` URLs for the same logical photo collapse into one candidate, preferring the largest/original asset.
+- On product save, the app persists one master image per logical photo.
+- If Cloudinary is configured, product masters are uploaded to `CLOUDINARY_PRODUCT_FOLDER` and `product_images` stores the managed delivery URL plus source/provider/asset metadata.
+- If Cloudinary is not configured, local development stores product images under `/public/uploads/products`; on Vercel without Cloudinary the app falls back to the remote URL with a warning.
+- Storefront delivery uses context-aware URLs: smaller transformed assets for catalog/admin preview and larger-but-bounded assets for PDP.
+- After adding the new `product_images` metadata columns, run `npm run db:push` so the managed pipeline can persist the full product media shape.
 
 ## Next practical steps
 

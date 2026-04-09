@@ -1,10 +1,10 @@
 import Image from "next/image";
 import Link from "next/link";
 
-import { PublicHeader } from "@/components/layout/public-header";
-import { BrandLogo } from "@/components/ui/brand-logo";
+import { PublicFooter } from "@/components/layout/public-footer";
+import { getPublicNavItems, PublicHeader } from "@/components/layout/public-header";
+import { BrandsSlider } from "@/components/marketing/brands-slider";
 import { Container } from "@/components/ui/container";
-import { Carousel } from "@/components/ui/carousel";
 import { SmartImage } from "@/components/ui/smart-image";
 import { ProductGrid } from "@/components/catalog/product-grid";
 import {
@@ -17,41 +17,35 @@ import { siteConfig } from "@/lib/site";
 import {
   compactGhostCtaClassName,
   ghostCtaClassName,
-  navLinkClassName,
   solidCtaClassName,
 } from "@/lib/ui";
 
-const navItems = [
-  { href: "#modalidades", label: "Modalidades" },
-  { href: "#categorias", label: "Categorías" },
-  { href: "#seleccion-inmediata", label: "Selección inmediata" },
-  { href: "#consultas", label: "Consultas" },
-];
+const navItems = getPublicNavItems();
 
-const heroHighlights = [
-  "impuestos incluidos",
-  "sin trámites después del pago",
-  "envío coordinado luego de la compra",
-];
+  const heroHighlights = [
+    "sin trámites aduaneros para vos",
+    "sin impuestos sorpresa al recibir",
+    "proceso simple y coordinado",
+  ];
 
 const shoppingModes = [
-  {
-    title: "Stock inmediato",
-    description: "Entrá a lo que ya está disponible y resolvé la compra rápido.",
-    href: "/stock",
-    cta: "Ver stock",
-    eyebrow: "Compra directa",
-    leadTime: "2-5 días",
-  },
-  {
-    title: "Encargue Internacional",
-    description:
-      "Primero encontrás el producto en el catálogo y después avanzás por WhatsApp con esa referencia.",
-    href: "/encargue",
-    cta: "Ver encargues",
-    eyebrow: "Catálogo a pedido",
-    leadTime: "30-60 días",
-  },
+    {
+      title: "Stock inmediato",
+      description: "Entrá a lo que ya está disponible y resolvé la compra rápido.",
+      href: "/stock",
+      cta: "Ver stock",
+      eyebrow: "Compra directa",
+      leadTime: "2-5 días",
+    },
+    {
+      title: "Encargue internacional asistido",
+      description:
+        "Elegís el producto, nosotros hacemos la importación y luego lo despachamos localmente desde Argentina. Sin trámites aduaneros ni impuestos sorpresa para vos.",
+      href: "/encargue",
+      cta: "Ver encargues",
+      eyebrow: "Sin trámites",
+      leadTime: "30-60 días",
+    },
 ];
 
 function SectionHeading({
@@ -65,7 +59,7 @@ function SectionHeading({
 }) {
   return (
     <div className="max-w-2xl space-y-3">
-      <p className="text-xs font-medium tracking-[0.32em] text-orange-200/70 uppercase">
+      <p className="text-xs font-medium tracking-[0.32em] text-[#f1d2dc]/72 uppercase">
         {eyebrow}
       </p>
       <h2 className="font-display text-4xl leading-[0.95] text-white sm:text-5xl">
@@ -109,12 +103,7 @@ export async function HomePage() {
       <PublicHeader
         homeLinkHref="#top"
         homeLinkLabel="Ir al inicio"
-        navItems={[
-          { href: "#modalidades", label: "Modalidades" },
-          { href: "#categorias", label: "Categorías" },
-          { href: "#seleccion-inmediata", label: "Selección inmediata" },
-          { href: "#consultas", label: "Consultas" },
-        ]}
+        navItems={navItems}
         actions={(
           <Link href="/catalogo" className={compactGhostCtaClassName}>
             Ver catálogo
@@ -127,20 +116,20 @@ export async function HomePage() {
           <div className="space-y-7 sm:space-y-8">
             <div className="space-y-5">
               <div className="flex flex-wrap items-center gap-3">
-                <span className="inline-flex rounded-full border border-orange-300/35 bg-orange-500/10 px-4 py-1 text-[11px] font-medium tracking-[0.32em] text-orange-100 uppercase">
+                <span className="inline-flex rounded-full border border-[rgba(210,138,163,0.56)] bg-[rgba(210,138,163,0.12)] px-4 py-1 text-[11px] font-medium tracking-[0.32em] text-[#f4d7e0] uppercase">
                   streetwear importado
                 </span>
               </div>
 
               <div className="space-y-4">
-                <p className="font-display text-sm tracking-[0.45em] text-orange-100/75 uppercase">
+                <p className="font-display text-sm tracking-[0.45em] text-[#f4d7e0] uppercase">
                   thewestrep
                 </p>
                 <h1 className="font-display max-w-4xl text-5xl leading-[0.9] text-white sm:text-7xl lg:text-[6rem]">
                   STREETWEAR LISTO PARA COMPRAR O ENCARGAR.
                 </h1>
                 <p className="max-w-xl text-sm leading-6 text-slate-300 sm:text-lg sm:leading-7">
-                  Entrá por stock o explorá encargues. Primero encontrás el producto en el catálogo y después seguís por WhatsApp con esa referencia.
+                  Stock inmediato para resolver rápido o encargue internacional asistido. Nosotros hacemos la importación y luego despachamos localmente, sin trámites para vos.
                 </p>
               </div>
             </div>
@@ -176,11 +165,11 @@ export async function HomePage() {
               <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(0,0,0,0.16),rgba(0,0,0,0.34)_38%,rgba(0,0,0,0.84))]" />
               <div className="absolute inset-x-0 bottom-0 space-y-4 p-6 sm:p-8">
                 <div className="max-w-sm rounded-[1.5rem] border border-white/12 bg-black/40 p-5 backdrop-blur-sm">
-                  <p className="text-xs tracking-[0.34em] text-orange-100/80 uppercase">
+                  <p className="text-xs tracking-[0.34em] text-[#f1d2dc]/80 uppercase">
                     Cómo comprar
                   </p>
                   <p className="mt-3 text-3xl font-semibold leading-none text-white sm:text-4xl">
-                    STOCK PARA VER YA. ENCARGUES PARA ELEGIR DESDE CATÁLOGO.
+                    STOCK PARA RESOLVER YA. ENCARGUES ASISTIDOS HASTA TU DOMICILIO.
                   </p>
                 </div>
               </div>
@@ -194,7 +183,7 @@ export async function HomePage() {
           <SectionHeading
             eyebrow="Modalidades"
             title="Elegí cómo querés comprar"
-            description="Dos caminos simples para entrar según lo que necesitás. En encargues, primero encontrás el producto en el catálogo y después avanzás con esa referencia."
+            description="Dos caminos claros según lo que necesitás. En encargues, elegís el producto y avanzás con nuestro servicio internacional asistido donde nosotros hacemos la importación y despachamos localmente."
           />
 
           <div className="grid gap-4 md:grid-cols-2">
@@ -204,18 +193,18 @@ export async function HomePage() {
                 href={mode.href}
                 className={
                   index === 0
-                    ? "group relative overflow-hidden rounded-[2rem] border border-orange-300/25 bg-[radial-gradient(circle_at_top,rgba(251,146,60,0.22),rgba(7,8,12,0.98)_58%)] p-7 shadow-[0_24px_60px_rgba(0,0,0,0.28)] transition duration-300 hover:-translate-y-1"
-                    : "group relative overflow-hidden rounded-[2rem] border border-white/12 bg-[linear-gradient(180deg,rgba(24,26,36,0.98),rgba(6,7,11,0.98))] p-7 shadow-[0_24px_60px_rgba(0,0,0,0.24)] transition duration-300 hover:-translate-y-1 hover:border-orange-300/35"
+                    ? "group relative overflow-hidden rounded-[2rem] border border-[rgba(210,138,163,0.35)] bg-[radial-gradient(circle_at_top,rgba(210,138,163,0.22),rgba(7,8,12,0.98)_58%)] p-7 shadow-[0_24px_60px_rgba(0,0,0,0.28)] transition duration-300 hover:-translate-y-1"
+                    : "group relative overflow-hidden rounded-[2rem] border border-white/12 bg-[linear-gradient(180deg,rgba(24,26,36,0.98),rgba(6,7,11,0.98))] p-7 shadow-[0_24px_60px_rgba(0,0,0,0.24)] transition duration-300 hover:-translate-y-1 hover:border-[rgba(210,138,163,0.56)]"
                 }
               >
                 <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0))] opacity-80" />
                 <div className="relative flex h-full flex-col justify-between gap-10">
                   <div className="space-y-4">
-                    <p className="text-xs tracking-[0.32em] text-orange-100/80 uppercase">{mode.eyebrow}</p>
+                    <p className="text-xs tracking-[0.32em] text-[#f1d2dc]/80 uppercase">{mode.eyebrow}</p>
                     <div className="space-y-3">
                       <h3 className="text-4xl font-semibold leading-none text-white sm:text-5xl">{mode.title}</h3>
                       <p className="max-w-sm text-sm leading-6 text-slate-200 sm:text-base">{mode.description}</p>
-                      <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-black/20 px-3 py-1.5 text-[11px] tracking-[0.24em] text-orange-100/85 uppercase">
+                      <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-black/20 px-3 py-1.5 text-[11px] tracking-[0.24em] text-[#f1d2dc]/85 uppercase">
                         <span>Entrega estimada</span>
                         <span className="text-white">{mode.leadTime}</span>
                       </div>
@@ -235,58 +224,11 @@ export async function HomePage() {
         <Container className="space-y-6">
           <SectionHeading
             eyebrow="Marcas"
-            title="Entrá a encargues por marca"
+            title="Entrá por marca"
             description="Una entrada más directa al catálogo: elegís la marca y ya caés con el filtro aplicado."
           />
 
-          <Carousel
-            ariaLabel="Marcas destacadas para encargues"
-            itemLabel="marcas"
-            visibleItems={{ base: 1, sm: 2, lg: 3 }}
-          >
-            {brandWall.map((brand) => (
-              <Link
-                key={brand.id}
-                href={brand.href}
-                className="group relative isolate flex h-full min-h-[19rem] flex-col overflow-hidden rounded-[1.75rem] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.045),rgba(255,255,255,0.015))] p-5 transition duration-300 hover:-translate-y-1 hover:border-orange-300/30 hover:shadow-[0_24px_60px_rgba(0,0,0,0.24)]"
-              >
-                <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(251,146,60,0.16),rgba(15,23,42,0)_44%),linear-gradient(180deg,rgba(255,255,255,0.03),rgba(255,255,255,0.01))] opacity-90 transition duration-500 group-hover:opacity-100" />
-
-                <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(7,8,12,0.1),rgba(7,8,12,0.24)_55%,rgba(7,8,12,0.6))]" />
-
-                <div className="relative flex h-full flex-col gap-5">
-                  <div className="relative flex min-h-40 flex-1 items-center justify-center overflow-hidden rounded-[1.35rem] border border-white/10 bg-white/[0.07] px-6 py-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
-                    {brand.image ? (
-                      <SmartImage
-                        src={brand.image ?? ""}
-                        alt={brand.alt}
-                        fill
-                        className="object-contain p-6 transition duration-500 group-hover:scale-[1.03]"
-                        sizes="(max-width: 639px) 100vw, (max-width: 1279px) 50vw, 30vw"
-                      />
-                    ) : (
-                      <span className="text-center font-display text-2xl tracking-[0.16em] text-white uppercase">
-                        {brand.name}
-                      </span>
-                    )}
-                    <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.08),rgba(255,255,255,0))]" />
-                  </div>
-
-                  <div className="mt-auto space-y-3 rounded-[1.35rem] border border-white/8 bg-black/10 p-4 backdrop-blur-[1px]">
-                    <p className="font-display text-2xl tracking-[0.14em] text-white uppercase sm:text-[1.7rem]">
-                      {brand.name}
-                    </p>
-                    <div className="flex items-center gap-3 text-sm text-slate-300 transition duration-300 group-hover:text-orange-100">
-                      <span>Ver productos</span>
-                      <span aria-hidden="true" className="text-base transition duration-300 group-hover:translate-x-1">
-                        ↗
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </Link>
-            ))}
-          </Carousel>
+          <BrandsSlider brands={brandWall} />
         </Container>
       </section>
 
@@ -295,7 +237,7 @@ export async function HomePage() {
           <SectionHeading
             eyebrow="Categorías"
             title="Encargues por categoría"
-            description="Entradas directas al catálogo de encargues con productos publicados y filtro aplicado desde el arranque."
+            description="Entradas directas al catálogo de encargues asistidos con productos publicados y filtro aplicado desde el arranque."
           />
 
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -303,7 +245,7 @@ export async function HomePage() {
               <Link
                 key={item.id}
                 href={item.href}
-                className="group overflow-hidden rounded-[1.75rem] border border-white/10 bg-white/[0.03] transition duration-300 hover:-translate-y-1 hover:border-orange-300/30 hover:shadow-[0_24px_60px_rgba(0,0,0,0.22)]"
+                className="group overflow-hidden rounded-[1.75rem] border border-white/10 bg-white/[0.03] transition duration-300 hover:-translate-y-1 hover:border-[rgba(210,138,163,0.42)] hover:shadow-[0_24px_60px_rgba(0,0,0,0.22)]"
               >
                 <div className="relative aspect-[4/5] overflow-hidden border-b border-white/10">
                   <SmartImage
@@ -319,13 +261,13 @@ export async function HomePage() {
                     <span className="rounded-full border border-white/10 bg-white/6 px-3 py-1 text-white/75">
                       {item.availabilityLabel}
                     </span>
-                    <span className="rounded-full border border-orange-300/20 bg-orange-500/10 px-3 py-1 text-orange-100/80">
+                    <span className="rounded-full border border-[rgba(210,138,163,0.28)] bg-[rgba(210,138,163,0.12)] px-3 py-1 text-[#f1d2dc]/80">
                       {item.productCount} producto{item.productCount === 1 ? "" : "s"}
                     </span>
                   </div>
                   <h3 className="text-lg font-semibold text-white">{item.name}</h3>
                   <p className="text-sm leading-6 text-slate-300">{item.description}</p>
-                  <div className="flex items-center justify-between gap-3 pt-1 text-sm font-medium text-orange-100">
+                  <div className="flex items-center justify-between gap-3 pt-1 text-sm font-medium text-[#f4d7e0]">
                     <span>Ver categoría</span>
                     <span aria-hidden="true" className="text-lg transition duration-300 group-hover:translate-x-1">
                       →
@@ -352,7 +294,7 @@ export async function HomePage() {
             </Link>
           </div>
 
-          <ProductGrid products={featuredStockProducts} cardVariant="home" />
+          <ProductGrid products={featuredStockProducts} cardVariant="home" contextAvailability="stock" />
         </Container>
       </section>
 
@@ -361,7 +303,7 @@ export async function HomePage() {
           <div className="overflow-hidden rounded-[2rem] border border-white/10 bg-[linear-gradient(135deg,rgba(255,255,255,0.045),rgba(255,255,255,0.018))] px-6 py-10 sm:px-10 sm:py-12">
             <div className="grid gap-8 lg:grid-cols-[1fr_0.82fr] lg:items-center">
               <div className="space-y-4">
-                <p className="text-xs font-medium tracking-[0.32em] text-orange-200/70 uppercase">
+                <p className="text-xs font-medium tracking-[0.32em] text-[#f1d2dc]/72 uppercase">
                   Consultas
                 </p>
                 <h2 className="font-display max-w-2xl text-5xl leading-[0.95] text-white sm:text-6xl">
@@ -383,8 +325,8 @@ export async function HomePage() {
                   Ver preguntas frecuentes
                 </Link>
                 <WhatsAppButton
-                  label="Hacer una consulta"
-                  message="Hola, tengo una consulta sobre stock o encargues en thewestrep."
+                  label="Hacer una consulta personalizada"
+                  message="Hola, tengo una consulta en thewestrep."
                   className={solidCtaClassName}
                 />
               </div>
@@ -393,47 +335,7 @@ export async function HomePage() {
         </Container>
       </section>
 
-      <footer className="border-t border-white/10 py-10">
-        <Container className="space-y-8 text-sm text-slate-400">
-          <div className="grid gap-8 md:grid-cols-[1.2fr_0.8fr_0.8fr]">
-            <div className="space-y-3">
-              <BrandLogo className="h-12 w-12" sizes="48px" />
-              <p>Streetwear importado con stock inmediato y encargues internacionales.</p>
-              <p className="text-slate-500">
-                Comprás por stock o elegís el producto en encargues y seguís por WhatsApp con esa referencia.
-              </p>
-            </div>
-
-            <div className="space-y-3">
-              <p className="text-xs font-medium tracking-[0.28em] text-white uppercase">Navegación</p>
-              <div className="flex flex-col gap-2">
-                {navItems.map((item) => (
-                  <Link key={item.href} href={item.href} className={navLinkClassName}>
-                    {item.label}
-                  </Link>
-                ))}
-              </div>
-            </div>
-
-            <div className="space-y-3">
-              <p className="text-xs font-medium tracking-[0.28em] text-white uppercase">Contacto</p>
-              <div className="space-y-2">
-                <p>Atención por WhatsApp para stock, pedidos y consultas.</p>
-                <WhatsAppButton
-                  label="Escribir ahora"
-                  message="Hola, quiero hacer una consulta en thewestrep."
-                  className={compactGhostCtaClassName}
-                />
-              </div>
-            </div>
-          </div>
-
-          <div className="flex flex-col gap-3 border-t border-white/10 pt-5 text-xs text-slate-500 md:flex-row md:items-center md:justify-between">
-            <p>© thewestrep. Stock y pedidos importados.</p>
-            <p>Precios claros, coordinación directa y seguimiento por WhatsApp.</p>
-          </div>
-        </Container>
-      </footer>
+      <PublicFooter />
     </div>
   );
 }

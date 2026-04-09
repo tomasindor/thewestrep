@@ -21,7 +21,7 @@ export function LoginForm() {
         const formData = new FormData(event.currentTarget);
 
         startTransition(async () => {
-          const result = await signIn("credentials", {
+          const result = await signIn("admin-credentials", {
             username: String(formData.get("username") ?? ""),
             password: String(formData.get("password") ?? ""),
             redirect: false,
@@ -47,7 +47,7 @@ export function LoginForm() {
           name="username"
           type="text"
           required
-          className="w-full rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-white outline-none transition focus:border-orange-300/55"
+          className="w-full rounded-[1.1rem] border border-white/10 bg-black/25 px-4 py-3 text-white outline-none transition focus:border-[rgba(210,138,163,0.5)] focus:ring-2 focus:ring-[rgba(210,138,163,0.24)]"
         />
       </div>
 
@@ -60,7 +60,7 @@ export function LoginForm() {
           name="password"
           type="password"
           required
-          className="w-full rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-white outline-none transition focus:border-orange-300/55"
+          className="w-full rounded-[1.1rem] border border-white/10 bg-black/25 px-4 py-3 text-white outline-none transition focus:border-[rgba(210,138,163,0.5)] focus:ring-2 focus:ring-[rgba(210,138,163,0.24)]"
         />
       </div>
 

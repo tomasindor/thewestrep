@@ -1,42 +1,76 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
+import { PublicFooter } from "@/components/layout/public-footer";
+import { getPublicNavItems, PublicHeader } from "@/components/layout/public-header";
 import { FaqAccordion } from "@/components/ui/faq-accordion";
 import { Container } from "@/components/ui/container";
 import { faqItems } from "@/lib/faq";
+import { createPageMetadata, sanitizeJsonLd } from "@/lib/seo";
 import { compactGhostCtaClassName, solidCtaClassName } from "@/lib/ui";
 
-export const metadata: Metadata = {
-  title: "Consultas frecuentes | thewestrep",
+export const metadata: Metadata = createPageMetadata({
+  title: "Consultas frecuentes",
   description:
-    "Preguntas frecuentes sobre stock, encargues internacionales, precios y cómo avanzar desde el catálogo de thewestrep.",
-};
+    "Preguntas frecuentes sobre stock, encargue internacional asistido, precios, entregas y cómo avanzar desde el catálogo de thewestrep.",
+  path: "/consultas",
+  keywords: ["preguntas frecuentes", "consultas", "envíos", "precios"],
+});
 
 const processSteps = [
   {
     title: "Elegí el camino",
-    description: "Entrá por stock si querés resolver rápido o por encargues si buscás catálogo internacional.",
+    description: "Entrá por stock si querés resolver rápido o por encargues si buscás un servicio internacional asistido.",
   },
   {
     title: "Encontrá el producto",
-    description: "En encargues, primero ubicás el artículo dentro del catálogo para avanzar con una referencia clara.",
+    description: "En encargues, ubicás el artículo dentro del catálogo para avanzar con una referencia clara desde el inicio.",
   },
   {
     title: "Seguimos por WhatsApp",
-    description: "Con esa referencia resolvemos disponibilidad, siguiente paso y coordinación sin vueltas.",
+    description: "Con esa referencia confirmamos disponibilidad, tiempos estimados y cómo sigue el proceso hasta la entrega.",
   },
 ];
 
 const keyPoints = [
   "precio claro desde el arranque",
-  "stock y encargues bien separados",
+  "encargue asistido puerta a puerta",
   "consulta puntual desde cada producto",
 ];
 
 export default function ConsultasPage() {
+  const faqJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    mainEntity: faqItems.map((item) => ({
+      "@type": "Question",
+      name: item.question,
+      acceptedAnswer: {
+        "@type": "Answer",
+        text: item.answer,
+      },
+    })),
+  };
+
   return (
-    <main className="flex-1 py-12 sm:py-16">
-      <Container className="space-y-8 sm:space-y-10">
+    <main className="flex-1">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: sanitizeJsonLd(faqJsonLd),
+        }}
+      />
+
+      <PublicHeader
+        navItems={getPublicNavItems()}
+        actions={
+          <Link href="/catalogo" className={compactGhostCtaClassName}>
+            Ver catálogo
+          </Link>
+        }
+      />
+
+      <Container className="space-y-8 py-12 sm:space-y-10 sm:py-16">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <Link href="/" className={compactGhostCtaClassName}>
             Volver al inicio
@@ -46,15 +80,15 @@ export default function ConsultasPage() {
           </Link>
         </div>
 
-        <section className="overflow-hidden rounded-[2rem] border border-white/10 bg-[radial-gradient(circle_at_top,rgba(251,146,60,0.18),rgba(8,10,16,0.98)_44%),linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.018))] p-6 shadow-[0_24px_70px_rgba(0,0,0,0.26)] sm:p-8 lg:p-10">
+        <section className="overflow-hidden rounded-[2rem] border border-white/10 bg-[radial-gradient(circle_at_top,rgba(210,138,163,0.18),rgba(8,10,16,0.98)_44%),linear-gradient(180deg,rgba(255,255,255,0.05),rgba(255,255,255,0.018))] p-6 shadow-[0_24px_70px_rgba(0,0,0,0.26)] sm:p-8 lg:p-10">
           <div className="grid gap-8 lg:grid-cols-[1.08fr_0.92fr] lg:items-center">
             <div className="space-y-5">
-              <p className="text-xs font-medium tracking-[0.32em] text-orange-200/75 uppercase">Consultas</p>
+              <p className="text-xs font-medium tracking-[0.32em] text-[#f1d2dc]/75 uppercase">Consultas</p>
               <h1 className="font-display max-w-4xl text-5xl leading-[0.95] text-white sm:text-6xl">
                 Todo más claro antes de escribirnos.
               </h1>
               <p className="max-w-2xl text-sm leading-6 text-slate-200 sm:text-base">
-                La lógica es simple: en encargues primero encontrás el producto en el catálogo y después seguimos por WhatsApp con esa referencia.
+                En encargues trabajamos con una lógica simple: encontrás el producto, encargamos a nuestros proveedores y te acompañamos durante todo el proceso hasta la entrega en tu domicilio.
               </p>
 
               <div className="flex flex-wrap gap-2 text-[11px] font-medium tracking-[0.24em] text-white/75 uppercase">
@@ -73,7 +107,7 @@ export default function ConsultasPage() {
                   className="rounded-[1.4rem] border border-white/8 bg-white/[0.035] p-4 sm:p-5"
                 >
                   <div className="flex items-start gap-4">
-                    <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-orange-300/25 bg-orange-500/12 text-sm font-semibold text-orange-100">
+                    <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[rgba(210,138,163,0.35)] bg-[rgba(210,138,163,0.14)] text-sm font-semibold text-[#f4d7e0]">
                       0{index + 1}
                     </span>
                     <div className="space-y-1.5">
@@ -92,12 +126,12 @@ export default function ConsultasPage() {
           data-page-section="faq-accordion"
         >
           <div className="space-y-4 lg:sticky lg:top-24">
-            <p className="text-xs font-medium tracking-[0.32em] text-orange-200/70 uppercase">Preguntas frecuentes</p>
+            <p className="text-xs font-medium tracking-[0.32em] text-[#f1d2dc]/70 uppercase">Preguntas frecuentes</p>
             <h2 className="font-display text-4xl leading-[0.95] text-white sm:text-5xl">
               Abrí solo lo que necesitás ver.
             </h2>
             <p className="max-w-md text-sm leading-6 text-slate-300 sm:text-base">
-              Ordenamos las respuestas para que puedas escanear rápido desde el celular y entrar en cada tema sin comerte una pared de texto.
+              Ordenamos las respuestas para que entiendas rápido cómo funciona el stock y qué implica el encargue internacional asistido, sin promesas confusas ni letra chica.
             </p>
           </div>
 
@@ -109,7 +143,7 @@ export default function ConsultasPage() {
             <div className="space-y-2">
               <h2 className="text-2xl font-semibold text-white">¿Ya viste lo que querés?</h2>
               <p className="max-w-2xl text-sm leading-6 text-slate-300 sm:text-base">
-                Entrá al catálogo, ubicá el producto y seguí la consulta desde esa referencia puntual.
+                Entrá al catálogo, ubicá el producto y avanzá con esa referencia para que podamos asistirte en todo el proceso.
               </p>
             </div>
 
@@ -119,6 +153,8 @@ export default function ConsultasPage() {
           </div>
         </section>
       </Container>
+
+      <PublicFooter />
     </main>
   );
 }

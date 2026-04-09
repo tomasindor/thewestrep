@@ -1,10 +1,17 @@
 import Link from "next/link";
 
-import type { CatalogFilterGroups, CatalogProductFilters } from "@/lib/catalog";
-import { compactGhostCtaClassName, filterGhostCtaClassName, filterSolidCtaClassName } from "@/lib/ui";
+import {
+  catalogSortOptions,
+  getCatalogFilterHref,
+  type CatalogFilterGroups,
+  type CatalogProductFilters,
+} from "@/lib/catalog/models";
+import type { ProductAvailability } from "@/lib/catalog/types";
+import { SearchSortToolbar } from "@/components/ui/search-sort-toolbar";
+import { filterGhostCtaClassName, filterSolidCtaClassName } from "@/lib/ui";
 
 interface CatalogFiltersProps {
-  basePath: string;
+  availability: ProductAvailability;
   filterGroups: CatalogFilterGroups;
   activeFilters: CatalogProductFilters;
   totalProducts: number;
@@ -12,32 +19,11 @@ interface CatalogFiltersProps {
 }
 
 function hasActiveFilters(filters: CatalogProductFilters) {
-  return Boolean(filters.categoryId || filters.brandId);
-}
-
-function buildFilterHref(
-  basePath: string,
-  activeFilters: CatalogProductFilters,
-  nextFilters: CatalogProductFilters,
-) {
-  const params = new URLSearchParams();
-  const filters = { ...activeFilters, ...nextFilters };
-
-  if (filters.brandId) {
-    params.set("brand", filters.brandId);
-  }
-
-  if (filters.categoryId) {
-    params.set("category", filters.categoryId);
-  }
-
-  const query = params.toString();
-
-  return query ? `${basePath}?${query}` : basePath;
+  return Boolean(filters.categoryId || filters.brandId || filters.query || filters.sort);
 }
 
 export function CatalogFilters({
-  basePath,
+  availability,
   filterGroups,
   activeFilters,
   totalProducts,
@@ -50,29 +36,45 @@ export function CatalogFilters({
       <div className="space-y-6 rounded-[1.75rem] border border-white/10 bg-white/[0.03] p-5 sm:p-6">
         <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
           <div className="space-y-2">
-            <p className="text-xs font-medium tracking-[0.32em] text-orange-200/70 uppercase">
+            <p className="text-xs font-medium tracking-[0.32em] text-[#f1d2dc]/72 uppercase">
               Filtros
             </p>
-            <p className="max-w-2xl text-sm leading-6 text-slate-300 sm:text-base">Entrá por marca o por tipo de prenda.</p>
+            <p className="max-w-2xl text-sm leading-6 text-slate-300 sm:text-base">
+              Buscá por texto, ordená la grilla y afiná por marca o por tipo de prenda.
+            </p>
           </div>
 
           <div className="space-y-1 text-sm text-slate-300 md:text-right">
             <p className="font-medium text-white">
               Mostrando {totalResults} de {totalProducts} productos
             </p>
-            {filtersAreActive ? <p>Selección activa lista para compartir.</p> : null}
+            {filtersAreActive ? <p>Vista actual lista para compartir.</p> : null}
           </div>
         </div>
 
         <div className="space-y-5">
+          <SearchSortToolbar
+            searchPlaceholder="Producto, marca o prenda"
+            defaultSortLabel="Destacados ✦"
+            searchValue={activeFilters.query}
+            sortValue={activeFilters.sort}
+            sortOptions={catalogSortOptions}
+            preservedParams={{
+              brand: activeFilters.brandId,
+              category: activeFilters.categoryId,
+            }}
+            pendingCopy="Actualizando catálogo..."
+          />
+
           <div className="space-y-3">
-            <p className="text-[11px] font-medium tracking-[0.28em] text-orange-200/70 uppercase">Marcas</p>
+            <p className="text-[11px] font-medium tracking-[0.28em] text-[#f1d2dc]/72 uppercase">Marcas</p>
             <div className="flex flex-wrap gap-2">
-              <Link
-                href={activeFilters.categoryId ? buildFilterHref(basePath, activeFilters, { brandId: undefined }) : basePath}
-                className={`inline-flex min-h-10 items-center justify-center rounded-full px-4 py-2 text-sm transition ${
-                   !activeFilters.brandId
-                    ? filterSolidCtaClassName
+               <Link
+                 href={getCatalogFilterHref(availability, { ...activeFilters, brandId: undefined })}
+                 scroll={false}
+                 className={`inline-flex min-h-10 items-center justify-center rounded-full px-4 py-2 text-sm transition ${
+                      !activeFilters.brandId
+                       ? filterSolidCtaClassName
                     : filterGhostCtaClassName
                  }`}
               >
@@ -83,10 +85,11 @@ export function CatalogFilters({
                 .map((brand) => (
                   <Link
                     key={brand.id}
-                    href={buildFilterHref(basePath, activeFilters, { brandId: brand.id })}
+                    href={getCatalogFilterHref(availability, { ...activeFilters, brandId: brand.id })}
+                    scroll={false}
                     className={`inline-flex min-h-10 items-center justify-center rounded-full px-4 py-2 text-sm transition ${
-                      activeFilters.brandId === brand.id
-                        ? filterSolidCtaClassName
+                        activeFilters.brandId === brand.id
+                          ? filterSolidCtaClassName
                         : filterGhostCtaClassName
                      }`}
                   >
@@ -97,13 +100,14 @@ export function CatalogFilters({
           </div>
 
           <div className="space-y-3">
-            <p className="text-[11px] font-medium tracking-[0.28em] text-orange-200/70 uppercase">Prendas</p>
+            <p className="text-[11px] font-medium tracking-[0.28em] text-[#f1d2dc]/72 uppercase">Prendas</p>
             <div className="flex flex-wrap gap-2">
-              <Link
-                href={activeFilters.brandId ? buildFilterHref(basePath, activeFilters, { categoryId: undefined }) : basePath}
-                className={`inline-flex min-h-10 items-center justify-center rounded-full px-4 py-2 text-sm transition ${
-                   !activeFilters.categoryId
-                    ? filterSolidCtaClassName
+               <Link
+                 href={getCatalogFilterHref(availability, { ...activeFilters, categoryId: undefined })}
+                 scroll={false}
+                 className={`inline-flex min-h-10 items-center justify-center rounded-full px-4 py-2 text-sm transition ${
+                      !activeFilters.categoryId
+                       ? filterSolidCtaClassName
                     : filterGhostCtaClassName
                  }`}
               >
@@ -114,10 +118,11 @@ export function CatalogFilters({
                 .map((category) => (
                   <Link
                     key={category.id}
-                    href={buildFilterHref(basePath, activeFilters, { categoryId: category.id })}
+                    href={getCatalogFilterHref(availability, { ...activeFilters, categoryId: category.id })}
+                    scroll={false}
                     className={`inline-flex min-h-10 items-center justify-center rounded-full px-4 py-2 text-sm transition ${
-                      activeFilters.categoryId === category.id
-                        ? filterSolidCtaClassName
+                        activeFilters.categoryId === category.id
+                          ? filterSolidCtaClassName
                         : filterGhostCtaClassName
                      }`}
                   >
@@ -127,14 +132,6 @@ export function CatalogFilters({
             </div>
           </div>
 
-          {filtersAreActive ? (
-            <Link
-              href={basePath}
-              className={compactGhostCtaClassName}
-            >
-              Limpiar filtros
-            </Link>
-          ) : null}
         </div>
       </div>
     </section>

@@ -37,6 +37,10 @@ export interface ProductImage {
   src: string;
   alt: string;
   role?: "cover" | "gallery";
+  sourceUrl?: string;
+  provider?: "cloudinary" | "local";
+  assetKey?: string;
+  cloudName?: string;
 }
 
 export interface ProductPricing {
@@ -55,6 +59,20 @@ export interface ProductSize {
 export interface ProductVariant {
   id: string;
   label: string;
+}
+
+export interface ProductSizeGuideRow {
+  label: string;
+  values: string[];
+}
+
+export interface ProductSizeGuide {
+  title?: string;
+  unitLabel?: string;
+  notes?: string;
+  sourceImageUrl?: string;
+  columns: string[];
+  rows: ProductSizeGuideRow[];
 }
 
 export interface EditableInventorySize {
@@ -91,6 +109,7 @@ export interface Product {
   availabilityInfo: ProductAvailabilityInfo;
   gallery: ProductImage[];
   sizes?: ProductSize[];
+  sizeGuide?: ProductSizeGuide;
   variants?: ProductVariant[];
   badge?: ProductBadge;
   featuredOnHomepage?: boolean;

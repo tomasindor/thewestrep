@@ -1,0 +1,13 @@
+.slider {
+  display: flex;
+  width: 100%;
+  overflow: visible;
+  touch-action: pan-y pinch-zoom;
+}
+
+.slide {
+  min-width: 0;
+  display: flex;
+  height: auto;
+  align-items: stretch;
+}

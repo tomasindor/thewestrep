@@ -3,6 +3,7 @@ import { categories } from "@/lib/catalog/data/categories";
 import { editableEncargueProducts } from "@/lib/catalog/data/inventory-editable-encargue";
 import { editableCatalogInventorySource } from "@/lib/catalog/data/inventory-editable";
 import { editableStockProducts } from "@/lib/catalog/data/inventory-editable-stock";
+import { buildProductImageAlt } from "@/lib/catalog/image-alt";
 import type {
   CatalogInventorySource,
   CatalogInventoryValidationIssue,
@@ -44,6 +45,8 @@ function mapEditableInventorySize(
 }
 
 function mapEditableInventoryProduct(product: EditableInventoryProduct): Product {
+  const totalImages = 1 + (product.gallery?.length ?? 0);
+
   return {
     id: product.slug,
     slug: product.slug,
@@ -68,13 +71,27 @@ function mapEditableInventoryProduct(product: EditableInventoryProduct): Product
       {
         id: "cover",
         src: product.coverImage,
-        alt: product.coverAlt,
+        alt: buildProductImageAlt({
+          productName: product.name,
+          brandName: brands.find((brand) => brand.id === product.brand)?.name,
+          categoryName: categories.find((category) => category.id === product.category)?.name,
+          imageIndex: 1,
+          totalImages,
+          role: "cover",
+        }),
         role: "cover",
       },
       ...(product.gallery?.map((image, index) => ({
         id: `gallery-${index + 1}`,
         src: image.src,
-        alt: image.alt,
+        alt: buildProductImageAlt({
+          productName: product.name,
+          brandName: brands.find((brand) => brand.id === product.brand)?.name,
+          categoryName: categories.find((category) => category.id === product.category)?.name,
+          imageIndex: index + 2,
+          totalImages,
+          role: "gallery",
+        }),
         role: "gallery" as const,
       })) ?? []),
     ],

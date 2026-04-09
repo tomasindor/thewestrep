@@ -9,16 +9,16 @@ export const faqItems: FaqItem[] = [
     answer:
       "Entrás a stock, elegís el producto y nos escribís para cerrar la compra y coordinar la entrega.",
   },
-  {
-    question: "¿Cómo compro por encargue internacional?",
-    answer:
-      "Entrás al catálogo de encargues, encontrás el producto que te interesa y seguimos por WhatsApp con esa referencia.",
-  },
-  {
-    question: "¿Los precios ya incluyen impuestos?",
-    answer:
-      "Sí, la idea es que tengas el precio claro desde el arranque, sin trámites extra después del pago.",
-  },
+    {
+      question: "¿Cómo compro por encargue internacional?",
+      answer:
+        "Entrás al catálogo de encargues, encontrás el producto que te interesa y avanzamos por WhatsApp con esa referencia. Nosotros hacemos la importación y luego despachamos localmente desde Argentina, sin trámites aduaneros para vos.",
+    },
+    {
+      question: "¿Los precios ya incluyen impuestos?",
+      answer:
+        "Sí, los precios publicados incluyen todos los costos. Con nuestro nuevo flujo, nosotros hacemos la importación y luego despachamos localmente desde Argentina, así no tenés trámites aduaneros ni impuestos sorpresa al recibir tu pedido.",
+    },
   {
     question: "¿Cuánto suele demorar un encargue?",
     answer:
@@ -27,7 +27,7 @@ export const faqItems: FaqItem[] = [
   {
     question: "¿Qué diferencia hay entre stock y encargue?",
     answer:
-      "Stock es lo que ya está disponible. Encargue es para productos del catálogo internacional que se gestionan a pedido.",
+      "Stock es lo que ya está disponible para compra directa. Encargue es un servicio internacional asistido: elegís el producto del catálogo y nosotros gestionamos el pedido con proveedores y el seguimiento posterior.",
   },
   {
     question: "¿Cómo hago una consulta desde el catálogo?",
@@ -67,7 +67,7 @@ export const faqItems: FaqItem[] = [
   {
     question: "¿Trabajan solo por WhatsApp?",
     answer:
-      "Sí. El catálogo ordena la búsqueda y WhatsApp es el canal para confirmar, coordinar y seguir la compra.",
+      "Sí. El catálogo ordena la búsqueda y WhatsApp es el canal donde confirmamos, coordinamos y te acompañamos durante todo el proceso.",
   },
   {
     question: "¿Qué hago si ya elegí un producto?",

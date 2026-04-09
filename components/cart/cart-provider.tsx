@@ -32,9 +32,14 @@ const initialState: CartState = {
   items: [],
   customer: {
     name: "",
-    contact: "",
+    phone: "",
+    email: "",
+    cuil: "",
+    checkoutMode: "",
+    authProvider: "",
     preferredChannel: "",
     customerStatus: "",
+    deliveryRecipient: "",
     fulfillment: "",
     location: "",
     notes: "",
@@ -45,6 +50,20 @@ const CartContext = createContext<CartContextValue | null>(null);
 
 function getCartItemId(item: AddCartItemInput) {
   return [item.productId, item.variantLabel?.trim() ?? "", item.sizeLabel?.trim() ?? ""].join("::");
+}
+
+function getLegacyContactFields(contact: unknown) {
+  const normalizedContact = typeof contact === "string" ? contact.trim() : "";
+
+  if (!normalizedContact) {
+    return { phone: "", email: "" };
+  }
+
+  if (normalizedContact.includes("@")) {
+    return { phone: "", email: normalizedContact };
+  }
+
+  return { phone: normalizedContact, email: "" };
 }
 
 export function CartProvider({ children }: { children: ReactNode }) {
@@ -58,17 +77,36 @@ export function CartProvider({ children }: { children: ReactNode }) {
 
       if (storedValue) {
         const parsedValue = JSON.parse(storedValue) as Partial<CartState>;
+        const customerData = parsedValue.customer as (Partial<CartCustomerProfile> & { contact?: string }) | undefined;
+        const legacyContactFields = getLegacyContactFields(customerData?.contact);
 
         setState({
           items: Array.isArray(parsedValue.items) ? parsedValue.items : [],
           customer: {
-            name: parsedValue.customer?.name ?? "",
-            contact: parsedValue.customer?.contact ?? "",
-            preferredChannel: parsedValue.customer?.preferredChannel ?? "",
-            customerStatus: parsedValue.customer?.customerStatus ?? "",
-            fulfillment: parsedValue.customer?.fulfillment ?? "",
-            location: parsedValue.customer?.location ?? "",
-            notes: parsedValue.customer?.notes ?? "",
+            ...legacyContactFields,
+            name: customerData?.name ?? "",
+            phone: customerData?.phone ?? legacyContactFields.phone,
+            email: customerData?.email ?? legacyContactFields.email,
+            cuil: customerData?.cuil ?? "",
+            checkoutMode:
+              customerData?.checkoutMode === "account"
+                ? "account"
+                : customerData?.checkoutMode === "guest"
+                  ? "guest"
+                  : "",
+            authProvider:
+              customerData?.authProvider === "google" || customerData?.authProvider === "credentials"
+                ? customerData.authProvider
+                : "",
+            preferredChannel: customerData?.preferredChannel ?? "",
+            customerStatus: customerData?.customerStatus ?? "",
+            deliveryRecipient: customerData?.deliveryRecipient ?? "",
+            fulfillment:
+              customerData?.fulfillment === "envio-caba-gba" || customerData?.fulfillment === "envio-interior"
+                ? customerData.fulfillment
+                : "",
+            location: customerData?.location ?? "",
+            notes: customerData?.notes ?? "",
           },
         });
       }
@@ -96,10 +134,12 @@ export function CartProvider({ children }: { children: ReactNode }) {
       isOpen,
       isHydrated,
       itemCount,
-      hasRequiredCustomerData: Boolean(state.customer.name.trim() && state.customer.contact.trim()),
+      hasRequiredCustomerData: Boolean(state.customer.name.trim() && state.customer.phone.trim() && state.customer.email.trim()),
       hasOptionalCustomerContext: Boolean(
-        state.customer.preferredChannel ||
+        state.customer.cuil.trim() ||
+          state.customer.preferredChannel ||
           state.customer.customerStatus ||
+          state.customer.deliveryRecipient.trim() ||
           state.customer.fulfillment ||
           state.customer.location.trim() ||
           state.customer.notes.trim(),
@@ -135,7 +175,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
             ],
           };
         });
-        
+
         setIsOpen(true);
       },
       clearCart: () => {

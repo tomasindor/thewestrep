@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 
 import { ProductDetailPage } from "@/components/catalog/product-detail-page";
 import { getCatalogProductById } from "@/lib/catalog";
-import { siteConfig } from "@/lib/site";
+import { createProductMetadata } from "@/lib/seo";
 
 interface EncargueProductPageProps {
   params: Promise<{ productId: string }>;
@@ -17,10 +17,7 @@ export async function generateMetadata({ params }: EncargueProductPageProps): Pr
     return {};
   }
 
-  return {
-    title: `${product.name} | ${siteConfig.title}`,
-    description: `${product.name} por encargue en thewestrep con precio visible y atención por WhatsApp.`,
-  };
+  return createProductMetadata(product);
 }
 
 export default async function EncargueProductPage({ params }: EncargueProductPageProps) {

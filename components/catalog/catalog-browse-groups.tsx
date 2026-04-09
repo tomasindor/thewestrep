@@ -1,7 +1,7 @@
 import Link from "next/link";
 
 import { SmartImage } from "@/components/ui/smart-image";
-import type { CatalogBrowseGroup } from "@/lib/catalog";
+import type { CatalogBrowseGroup } from "@/lib/catalog/models";
 
 interface CatalogBrowseGroupsProps {
   groups: CatalogBrowseGroup[];
@@ -16,7 +16,7 @@ export function CatalogBrowseGroups({ groups }: CatalogBrowseGroupsProps) {
           className="space-y-4 rounded-[1.75rem] border border-white/10 bg-white/[0.03] p-5 sm:p-6"
         >
           <div className="space-y-1">
-            <p className="text-xs font-medium tracking-[0.3em] text-orange-200/70 uppercase">Atajos</p>
+            <p className="text-xs font-medium tracking-[0.3em] text-[#f1d2dc]/72 uppercase">Atajos</p>
             <h2 className="text-xl font-semibold text-white sm:text-2xl">{group.title}</h2>
           </div>
 
@@ -27,13 +27,15 @@ export function CatalogBrowseGroups({ groups }: CatalogBrowseGroupsProps) {
                 href={option.href}
                 className="group relative min-h-36 overflow-hidden rounded-[1.5rem] border border-white/10 bg-black"
               >
-                <SmartImage
-                  src={option.image}
-                  alt={option.alt}
-                  fill
-                  className="object-cover transition duration-700 group-hover:scale-105"
-                  sizes="(max-width: 1024px) 50vw, 20vw"
-                />
+                <span className="absolute -inset-px overflow-hidden [transform:translateZ(0)]">
+                  <SmartImage
+                    src={option.image}
+                    alt={option.alt}
+                    fill
+                    className="object-cover [transform:translateZ(0)_scale(1.004)] transition duration-700 group-hover:scale-105"
+                    sizes="(max-width: 1024px) 50vw, 20vw"
+                  />
+                </span>
                 <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(0,0,0,0.14),rgba(0,0,0,0.86))]" />
                 <div className="absolute inset-x-0 bottom-0 space-y-1 p-4">
                   <p className="text-sm font-semibold text-white">{option.label}</p>

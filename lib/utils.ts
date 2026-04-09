@@ -1,3 +1,5 @@
+import { buildProductFallbackImageAlt } from "@/lib/catalog/image-alt";
+
 export function slugify(value: string) {
   return value
     .normalize("NFKD")
@@ -24,10 +26,10 @@ export function formatArs(amount: number) {
   }).format(amount);
 }
 
-export function defaultProductImage(productName: string) {
+export function defaultProductImage(productName: string, brandName?: string, categoryName?: string) {
   return {
     src: "/destacada.png",
-    alt: productName ? `Imagen de referencia de ${productName}` : "Imagen de referencia de thewestrep",
+    alt: buildProductFallbackImageAlt(productName, brandName, categoryName),
   };
 }
 

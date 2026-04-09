@@ -1,72 +1,38 @@
 import { cache } from "react";
 
-import type { Brand, Category, Product, ProductAvailability, ProductImage, ProductState } from "@/lib/catalog/types";
+import type { ProductAvailability, ProductImage } from "@/lib/catalog/types";
+import {
+  getAvailabilityLabel,
+  getCatalogPath,
+  type CatalogBrowseGroup,
+  type CatalogBrowseOption,
+  type CatalogFilterGroups,
+  type CatalogProduct,
+  type CatalogProductFilters,
+  type CatalogProductSort,
+  type HomepageBrandSpotlight,
+  type HomepageCategorySpotlight,
+  type HomepageFeaturedProduct,
+} from "@/lib/catalog/models";
+import { buildBrandImageAlt, buildCategoryImageAlt } from "@/lib/catalog/image-alt";
+import { brands as fallbackBrands, homepageBrandPriorityIds } from "@/lib/catalog/data/brands";
 import { getCatalogDataset, getProductsRepository } from "@/lib/catalog/repository";
-
-const availabilityLabels: Record<ProductAvailability, string> = {
-  stock: "Stock inmediato",
-  encargue: "Encargue",
-};
-
-export interface CatalogProduct extends Product {
-  brand: Brand;
-  category: Category;
-  availabilityLabel: string;
-  image: string;
-  alt: string;
-}
-
-export interface CatalogFilterOption {
-  id: string;
-  label: string;
-  count: number;
-}
-
-export interface CatalogFilterGroups {
-  brands: CatalogFilterOption[];
-  categories: CatalogFilterOption[];
-}
-
-export interface CatalogProductFilters {
-  brandId?: Brand["id"];
-  categoryId?: Category["id"];
-  availability?: ProductAvailability;
-  states?: ProductState[];
-}
-
-export interface CatalogBrowseOption {
-  id: string;
-  label: string;
-  href: string;
-  image: string;
-  alt: string;
-  count: number;
-}
-
-export interface CatalogBrowseGroup {
-  id: "brands" | "categories";
-  title: string;
-  options: CatalogBrowseOption[];
-}
-
-export interface HomepageBrandSpotlight {
-  id: string;
-  name: string;
-  href: string;
-  image?: string;
-  alt: string;
-}
-
-export interface HomepageCategorySpotlight extends Category {
-  href: string;
-  availability: ProductAvailability;
-  availabilityLabel: string;
-  productCount: number;
-}
 
 type CatalogSearchParams = Record<string, string | string[] | undefined>;
 
-export type HomepageFeaturedProduct = CatalogProduct;
+function pickRandomUniqueItems<T>(items: readonly T[], limit: number) {
+  const shuffledItems = [...items];
+
+  for (let index = shuffledItems.length - 1; index > 0; index -= 1) {
+    const randomIndex = Math.floor(Math.random() * (index + 1));
+    const currentItem = shuffledItems[index];
+
+    shuffledItems[index] = shuffledItems[randomIndex];
+    shuffledItems[randomIndex] = currentItem;
+  }
+
+  return shuffledItems.slice(0, limit);
+}
 
 function getProductCoverImage(gallery: ProductImage[]) {
   const coverImage = gallery.find((image) => image.role === "cover") ?? gallery[0];
@@ -86,6 +52,64 @@ function getSingleSearchParamValue(value: string | string[] | undefined) {
   return value;
 }
 
+function normalizeSearchText(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLocaleLowerCase("es")
+    .trim();
+}
+
+function parseCatalogSort(value: string | undefined): CatalogProductSort | undefined {
+  switch (value) {
+    case "price-asc":
+    case "price-desc":
+    case "alpha-asc":
+    case "alpha-desc":
+      return value;
+    default:
+      return undefined;
+  }
+}
+
+function matchesCatalogQuery(product: CatalogProduct, query: string) {
+  const normalizedQuery = normalizeSearchText(query);
+
+  if (!normalizedQuery) {
+    return true;
+  }
+
+  const searchableContent = [product.name, product.brand.name, product.category.name, product.detail]
+    .map((value) => normalizeSearchText(value))
+    .join(" ");
+
+  return normalizedQuery
+    .split(/\s+/)
+    .filter(Boolean)
+    .every((term) => searchableContent.includes(term));
+}
+
+function sortCatalogProducts(products: CatalogProduct[], sort: CatalogProductSort | undefined) {
+  if (!sort) {
+    return products;
+  }
+
+  return [...products].sort((left, right) => {
+    switch (sort) {
+      case "price-asc":
+        return left.pricing.amount - right.pricing.amount;
+      case "price-desc":
+        return right.pricing.amount - left.pricing.amount;
+      case "alpha-asc":
+        return left.name.localeCompare(right.name, "es", { sensitivity: "base" });
+      case "alpha-desc":
+        return right.name.localeCompare(left.name, "es", { sensitivity: "base" });
+      default:
+        return 0;
+    }
+  });
+}
+
 function matchesCatalogFilters(product: CatalogProduct, filters: CatalogProductFilters) {
   if (filters.brandId && product.brand.id !== filters.brandId) {
     return false;
@@ -100,6 +124,10 @@ function matchesCatalogFilters(product: CatalogProduct, filters: CatalogProductF
   }
 
   if (filters.states?.length && (!product.state || !filters.states.includes(product.state))) {
+    return false;
+  }
+
+  if (filters.query && !matchesCatalogQuery(product, filters.query)) {
     return false;
   }
 
@@ -128,7 +156,7 @@ const getCatalogContext = cache(async function getCatalogContext() {
         ...product,
         brand,
         category,
-        availabilityLabel: availabilityLabels[product.availability],
+        availabilityLabel: getAvailabilityLabel(product.availability),
         image: coverImage.src,
         alt: coverImage.alt,
       } satisfies CatalogProduct,
@@ -143,18 +171,6 @@ const getCatalogContext = cache(async function getCatalogContext() {
     categoriesById,
   };
 });
-
-export function getAvailabilityLabel(availability: ProductAvailability) {
-  return availabilityLabels[availability];
-}
-
-export function getCatalogPath(availability: ProductAvailability) {
-  return `/${availability}`;
-}
-
-export function getProductPath(product: Pick<Product, "availability" | "slug">) {
-  return `${getCatalogPath(product.availability)}/${product.slug}`;
-}
 
 export async function getCategories() {
   const dataset = await getCatalogDataset();
@@ -175,10 +191,14 @@ export async function getProducts() {
 export function getCatalogFiltersFromSearchParams(searchParams: CatalogSearchParams): CatalogProductFilters {
   const brand = getSingleSearchParamValue(searchParams.brand);
   const category = getSingleSearchParamValue(searchParams.category);
+  const query = getSingleSearchParamValue(searchParams.q)?.trim();
+  const sort = parseCatalogSort(getSingleSearchParamValue(searchParams.sort));
 
   return {
     brandId: brand,
     categoryId: category,
+    query,
+    sort,
   };
 }
 
@@ -186,17 +206,41 @@ export async function getCatalogProducts(filters: CatalogProductFilters = {}): P
   const context = await getCatalogContext();
   const states = filters.states ?? ["published"];
 
-  return context.products.filter((product) => matchesCatalogFilters(product, { ...filters, states }));
+  return sortCatalogProducts(
+    context.products.filter((product) => matchesCatalogFilters(product, { ...filters, states })),
+    filters.sort,
+  );
 }
 
 export async function getCatalogFilterGroups(filters: CatalogProductFilters = {}): Promise<CatalogFilterGroups> {
   const context = await getCatalogContext();
-  const catalogProducts = context.products.filter((product) => matchesCatalogFilters(product, { ...filters, states: ["published"] }));
   const brandCountById = new Map<string, number>();
   const categoryCountById = new Map<string, number>();
+  const sharedScopedFilters: CatalogProductFilters = {
+    availability: filters.availability,
+    query: filters.query,
+    sort: filters.sort,
+    states: ["published"],
+  };
 
-  for (const product of catalogProducts) {
+  const brandScopedProducts = context.products.filter((product) =>
+    matchesCatalogFilters(product, {
+      ...sharedScopedFilters,
+      categoryId: filters.categoryId,
+    }),
+  );
+  const categoryScopedProducts = context.products.filter((product) =>
+    matchesCatalogFilters(product, {
+      ...sharedScopedFilters,
+      brandId: filters.brandId,
+    }),
+  );
+
+  for (const product of brandScopedProducts) {
     brandCountById.set(product.brand.id, (brandCountById.get(product.brand.id) ?? 0) + 1);
+  }
+
+  for (const product of categoryScopedProducts) {
     categoryCountById.set(product.category.id, (categoryCountById.get(product.category.id) ?? 0) + 1);
   }
 
@@ -224,18 +268,38 @@ export async function getCatalogProductById(
   return products.find((product) => product.slug === productId || product.id === productId) ?? null;
 }
 
-export async function getRelatedCatalogProducts(product: CatalogProduct, limit = 3) {
+export async function getRelatedCatalogProducts(product: CatalogProduct, limit = 10) {
   const products = await getCatalogProducts({ availability: product.availability });
+  const tiers: CatalogProduct[][] = [[], [], []];
+  const seenProductIds = new Set<string>([product.id]);
 
-  return products
-    .filter((candidate) => candidate.id !== product.id)
-    .sort((left, right) => {
-      const leftScore = Number(left.brand.id === product.brand.id) + Number(left.category.id === product.category.id);
-      const rightScore = Number(right.brand.id === product.brand.id) + Number(right.category.id === product.category.id);
+  for (const candidate of products) {
+    if (seenProductIds.has(candidate.id)) {
+      continue;
+    }
 
-      return rightScore - leftScore;
-    })
-    .slice(0, limit);
+    const matchesBrand = candidate.brand.id === product.brand.id;
+    const matchesCategory = candidate.category.id === product.category.id;
+
+    if (matchesBrand && matchesCategory) {
+      tiers[0].push(candidate);
+      seenProductIds.add(candidate.id);
+      continue;
+    }
+
+    if (matchesBrand) {
+      tiers[1].push(candidate);
+      seenProductIds.add(candidate.id);
+      continue;
+    }
+
+    if (matchesCategory) {
+      tiers[2].push(candidate);
+      seenProductIds.add(candidate.id);
+    }
+  }
+
+  return tiers.flat().slice(0, limit);
 }
 
 export async function getCatalogBrowseGroups(availability: ProductAvailability): Promise<CatalogBrowseGroup[]> {
@@ -261,7 +325,7 @@ export async function getCatalogBrowseGroups(availability: ProductAvailability):
             label: brand.name,
             href: `${getCatalogPath(availability)}?brand=${brand.id}`,
             image: brand.image ?? matches[0].image,
-            alt: brand.alt ?? matches[0].alt,
+            alt: buildBrandImageAlt(brand.name),
             count: matches.length,
           } satisfies CatalogBrowseOption;
         })
@@ -283,7 +347,7 @@ export async function getCatalogBrowseGroups(availability: ProductAvailability):
             label: category.name,
             href: `${getCatalogPath(availability)}?category=${category.id}`,
             image: category.image,
-            alt: category.alt,
+            alt: buildCategoryImageAlt(category.name),
             count: matches.length,
           } satisfies CatalogBrowseOption;
         })
@@ -340,11 +404,10 @@ export async function getHomepageHeroCategories() {
 export async function getHomepageFeaturedProducts(
   availability: ProductAvailability = "stock",
 ): Promise<HomepageFeaturedProduct[]> {
-  const products = await getCatalogProducts({ availability });
+  const products = await getCatalogProducts({ availability, states: ["published"] });
+  const uniqueProducts = Array.from(new Map(products.map((product) => [product.id, product])).values());
 
-  return products
-    .filter((product) => product.featuredOnHomepage)
-    .slice(0, 6);
+  return pickRandomUniqueItems(uniqueProducts, 5);
 }
 
 export async function getHomepageProductFilters() {
@@ -359,14 +422,26 @@ export async function getHomepageProductFilters() {
 
 export async function getHomepageBrands(): Promise<HomepageBrandSpotlight[]> {
   const context = await getCatalogContext();
+  const brandsById = new Map(context.brands.map((brand) => [brand.id, brand]));
+  const fallbackBrandsById = new Map(fallbackBrands.map((brand) => [brand.id, brand]));
 
-  return context.brands
-    .toSorted((left, right) => left.name.localeCompare(right.name, "es"))
-    .map((brand) => ({
-      id: brand.id,
-      name: brand.name,
-      href: `${getCatalogPath("encargue")}?brand=${brand.id}`,
-      image: brand.image,
-      alt: brand.alt ?? `Imagen de ${brand.name}`,
-    }));
+  return homepageBrandPriorityIds.flatMap((brandId) => {
+    const brand = brandsById.get(brandId) ?? fallbackBrandsById.get(brandId);
+
+    if (!brand) {
+      return [];
+    }
+
+    const fallbackBrand = fallbackBrandsById.get(brandId);
+
+    return [
+      {
+        id: brand.id,
+        name: brand.name,
+        href: `${getCatalogPath("encargue")}?brand=${brand.id}`,
+        image: brand.image ?? fallbackBrand?.image,
+        alt: buildBrandImageAlt(brand.name),
+      },
+    ];
+  });
 }

@@ -1,11 +1,16 @@
-import type { ProductAvailability } from "@/lib/catalog";
+import type { ProductAvailability } from "@/lib/catalog/types";
 
 export interface CartCustomerProfile {
   name: string;
-  contact: string;
+  phone: string;
+  email: string;
+  cuil: string;
+  checkoutMode: "" | "guest" | "account";
+  authProvider: "" | "credentials" | "google";
   preferredChannel: "" | "whatsapp" | "instagram" | "email";
   customerStatus: "" | "new" | "returning";
-  fulfillment: "" | "retiro" | "envio-caba-gba" | "envio-interior";
+  deliveryRecipient: string;
+  fulfillment: "" | "envio-caba-gba" | "envio-interior";
   location: string;
   notes: string;
 }
@@ -15,6 +20,13 @@ export interface CartItem {
   productId: string;
   productSlug: string;
   productName: string;
+  productImage?: {
+    src: string;
+    alt: string;
+    provider?: "cloudinary" | "local";
+    assetKey?: string;
+    cloudName?: string;
+  };
   availability: ProductAvailability;
   availabilityLabel: string;
   priceDisplay: string;
@@ -27,6 +39,13 @@ export interface AddCartItemInput {
   productId: string;
   productSlug: string;
   productName: string;
+  productImage?: {
+    src: string;
+    alt: string;
+    provider?: "cloudinary" | "local";
+    assetKey?: string;
+    cloudName?: string;
+  };
   availability: ProductAvailability;
   availabilityLabel: string;
   priceDisplay: string;

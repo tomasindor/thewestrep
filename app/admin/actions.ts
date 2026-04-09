@@ -17,6 +17,7 @@ import {
   upsertProduct,
 } from "@/lib/catalog/repository";
 import { SUPPORTED_PRODUCT_SIZES } from "@/lib/catalog/options";
+import { normalizeProductSizeGuide, parseProductSizeGuideColumns, parseProductSizeGuideRows } from "@/lib/catalog/size-guides";
 import type { ProductState } from "@/lib/catalog/types";
 import { compactText, uniqueValues } from "@/lib/utils";
 
@@ -35,6 +36,12 @@ const productSchema = z.object({
   sourceUrl: z.string().optional().default(""),
   imageUrls: z.string().optional().default(""),
   sizes: z.array(sizeSchema).optional().default([]),
+  sizeGuideTitle: z.string().optional().default(""),
+  sizeGuideUnitLabel: z.string().optional().default(""),
+  sizeGuideNotes: z.string().optional().default(""),
+  sizeGuideSourceImageUrl: z.string().optional().default(""),
+  sizeGuideColumns: z.string().optional().default(""),
+  sizeGuideRows: z.string().optional().default(""),
   variants: z.string().optional().default(""),
 });
 
@@ -82,6 +89,12 @@ export async function saveProductAction(_previousState: ProductFormState, formDa
     sourceUrl: formData.get("sourceUrl"),
     imageUrls: formData.get("imageUrls"),
     sizes: formData.getAll("sizes"),
+    sizeGuideTitle: formData.get("sizeGuideTitle"),
+    sizeGuideUnitLabel: formData.get("sizeGuideUnitLabel"),
+    sizeGuideNotes: formData.get("sizeGuideNotes"),
+    sizeGuideSourceImageUrl: formData.get("sizeGuideSourceImageUrl"),
+    sizeGuideColumns: formData.get("sizeGuideColumns"),
+    sizeGuideRows: formData.get("sizeGuideRows"),
     variants: formData.get("variants"),
   });
 
@@ -91,8 +104,10 @@ export async function saveProductAction(_previousState: ProductFormState, formDa
     } satisfies ProductFormState;
   }
 
+  let successMessage: string;
+
   try {
-    await upsertProduct({
+    const result = await upsertProduct({
       id: parsed.data.productId,
       type: parsed.data.type,
       name: compactText(parsed.data.name),
@@ -105,17 +120,26 @@ export async function saveProductAction(_previousState: ProductFormState, formDa
       sourceUrl: compactText(parsed.data.sourceUrl) || undefined,
       imageUrls: parseLines(parsed.data.imageUrls),
       sizes: uniqueValues(parsed.data.sizes),
+      sizeGuide: normalizeProductSizeGuide({
+        title: compactText(parsed.data.sizeGuideTitle),
+        unitLabel: compactText(parsed.data.sizeGuideUnitLabel),
+        notes: compactText(parsed.data.sizeGuideNotes),
+        sourceImageUrl: compactText(parsed.data.sizeGuideSourceImageUrl) || undefined,
+        columns: parseProductSizeGuideColumns(parsed.data.sizeGuideColumns),
+        rows: parseProductSizeGuideRows(parsed.data.sizeGuideRows),
+      }),
       variants: parseLines(parsed.data.variants),
     });
 
     revalidateStorefrontPaths();
+    successMessage = buildSuccessMessage("Producto guardado", result.warning);
   } catch (error) {
     return {
       error: error instanceof Error ? error.message : "No se pudo guardar el producto.",
     } satisfies ProductFormState;
   }
 
-  redirect("/admin/products?message=Producto guardado");
+  redirect(`/admin/products?message=${encodeURIComponent(successMessage)}`);
 }
 
 function buildAdminRedirect(path: string, params: Record<string, string>) {

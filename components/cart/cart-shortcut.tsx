@@ -22,7 +22,7 @@ export function CartShortcut() {
       aria-label="Abrir carrito flotante"
     >
       <span>{itemCount > 0 ? "Checkout" : "Carrito"}</span>
-      <span className="rounded-full border border-white/10 bg-white/8 px-2 py-0.5 text-xs text-orange-100">
+      <span className="rounded-full border border-white/10 bg-white/8 px-2 py-0.5 text-xs text-[#f4d7e0]">
         {itemCount}
       </span>
     </button>

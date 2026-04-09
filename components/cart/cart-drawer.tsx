@@ -3,7 +3,11 @@
 import Link from "next/link";
 
 import { useCart } from "@/components/cart/cart-provider";
+import { SmartImage } from "@/components/ui/smart-image";
+import { getCorreoArgentinoFeeTotal, hasEncargueItems } from "@/lib/cart/assisted-orders";
+import { getProductImageUrlForContext } from "@/lib/media/product-images";
 import { compactGhostCtaClassName, solidCtaClassName } from "@/lib/ui";
+import { formatArs } from "@/lib/utils";
 
 function getSelectionCopy(variantLabel?: string, sizeLabel?: string) {
   return [variantLabel, sizeLabel].filter(Boolean).join(" · ");
@@ -13,8 +17,14 @@ function getProductHref(availability: "stock" | "encargue", productSlug: string)
   return `/${availability}/${productSlug}`;
 }
 
+const accentEyebrowClassName = "text-[#f1d2dc]/72";
+const accentTextClassName = "text-[#f4d7e0]";
+const accentSurfaceClassName = "border-[rgba(210,138,163,0.2)] bg-[rgba(210,138,163,0.08)]";
+
 export function CartDrawer() {
   const { closeCart, clearCart, isHydrated, isOpen, itemCount, items, removeItem, updateQuantity } = useCart();
+  const hasEncargueOrder = hasEncargueItems(items);
+  const correoArgentinoFeeTotal = getCorreoArgentinoFeeTotal(items);
 
   const handleClose = () => {
     closeCart();
@@ -43,7 +53,7 @@ export function CartDrawer() {
       <aside className="relative flex h-full w-full max-w-lg flex-col border-l border-white/10 bg-[#090b11] text-white shadow-2xl">
         <div className="flex items-center justify-between border-b border-white/10 px-5 py-4 sm:px-6">
           <div>
-            <p className="text-xs font-medium tracking-[0.28em] text-orange-200/70 uppercase">Checkout</p>
+            <p className={`text-xs font-medium tracking-[0.28em] uppercase ${accentEyebrowClassName}`}>Tu compra</p>
             <h2 className="mt-1 text-2xl font-semibold">Carrito</h2>
           </div>
 
@@ -68,7 +78,7 @@ export function CartDrawer() {
 
           {isHydrated && items.length === 0 ? (
             <div className="space-y-4 rounded-[1.5rem] border border-dashed border-white/12 bg-white/[0.03] p-5 text-sm leading-6 text-slate-300">
-              <p>Tu carrito está vacío. Sumá productos y dejá el checkout listo para terminar la compra.</p>
+              <p>Tu carrito está vacío. Sumá tus favoritos y revisalos acá cuando quieras.</p>
               <Link href="/catalogo" onClick={handleClose} className={compactGhostCtaClassName}>
                 Explorar catálogo
               </Link>
@@ -79,10 +89,15 @@ export function CartDrawer() {
             <section className="flex items-center justify-between rounded-[1.5rem] border border-white/10 bg-white/[0.03] px-4 py-4">
               <div>
                 <p className="text-sm font-semibold text-white">{items.length} productos</p>
-                <p className="text-sm text-slate-400">{itemCount} unidades en este checkout</p>
+                <p className="text-sm text-slate-400">{itemCount} unidades en tu carrito</p>
+                {hasEncargueOrder ? (
+                  <p className={`mt-1 text-xs leading-5 ${accentTextClassName}`}>
+                    Encargue asistido: Correo Argentino suma {correoArgentinoFeeTotal === 0 ? "-" : formatArs(correoArgentinoFeeTotal)} por pedido.
+                  </p>
+                ) : null}
               </div>
-              <Link href="/checkout" onClick={handleClose} className="text-sm text-slate-300 transition hover:text-white">
-                Abrir checkout
+              <Link href="/login" onClick={handleClose} className="text-sm text-slate-300 transition hover:text-white">
+                Resolver acceso
               </Link>
             </section>
           ) : null}
@@ -96,10 +111,30 @@ export function CartDrawer() {
                 return (
                   <article key={item.id} className="rounded-[1.5rem] border border-white/10 bg-white/[0.03] p-4">
                     <div className="flex items-start justify-between gap-4">
-                      <div className="space-y-2">
-                        <p className="text-base font-semibold text-white">{item.productName}</p>
-                        <p className="text-sm text-orange-100">{item.priceDisplay}</p>
-                        {selectionCopy ? <p className="text-xs uppercase tracking-[0.18em] text-white/60">{selectionCopy}</p> : null}
+                      <div className="flex min-w-0 items-start gap-4">
+                        <Link
+                          href={productHref}
+                          onClick={handleClose}
+                          aria-label={`Ver ${item.productName}`}
+                          className="relative h-24 w-20 shrink-0 overflow-hidden rounded-[1rem] border border-white/10 bg-black/20 transition hover:border-[rgba(210,138,163,0.34)]"
+                        >
+                          {item.productImage ? (
+                            <SmartImage
+                              src={getProductImageUrlForContext(item.productImage, "card")}
+                              alt={item.productImage.alt}
+                              fill
+                              className="h-full w-full object-cover"
+                              sizes="80px"
+                            />
+                          ) : null}
+                        </Link>
+
+                        <div className="min-w-0 space-y-2">
+                          <p className="text-base font-semibold text-white">{item.productName}</p>
+                          <p className={`text-sm ${accentTextClassName}`}>{item.priceDisplay}</p>
+                          {selectionCopy ? <p className="text-xs uppercase tracking-[0.18em] text-white/60">{selectionCopy}</p> : null}
+                          <p className="text-xs uppercase tracking-[0.18em] text-white/45">{item.availabilityLabel}</p>
+                        </div>
                       </div>
 
                       <div className="flex flex-col items-end gap-2">
@@ -141,39 +176,28 @@ export function CartDrawer() {
             </div>
           ) : null}
 
-          {items.length > 0 ? (
-            <section className="space-y-4 rounded-[1.5rem] border border-white/10 bg-white/[0.03] p-5">
-              <div>
-                <p className="text-xs font-medium tracking-[0.28em] text-orange-200/75 uppercase">Siguiente paso</p>
-                <h3 className="mt-1 text-xl font-semibold text-white">Pasá a la ruta dedicada del checkout.</h3>
-                <p className="mt-2 text-sm leading-6 text-slate-300">
-                  El drawer queda para edición rápida del carrito. El checkout ahora tiene su propia pantalla base para seguir creciendo fuera del panel lateral.
-                </p>
-              </div>
-
-              <Link href="/checkout" onClick={handleClose} className={`${solidCtaClassName} w-full`}>
-                Ir al checkout
-              </Link>
-
-              <p className="text-xs leading-5 text-slate-400">
-                Por ahora sólo separamos navegación y estructura. Pago, validaciones y cierre final quedan para una siguiente tanda.
+          {items.length > 0 && hasEncargueOrder ? (
+            <section className={`space-y-3 rounded-[1.5rem] border p-5 ${accentSurfaceClassName}`}>
+              <h3 className="text-lg font-semibold text-white">Encargue puerta a puerta</h3>
+              <p className="text-sm leading-6 text-slate-200">
+                Este pedido incluye encargues con seguimiento asistido hasta la entrega.
+              </p>
+              <p className={`text-sm ${accentTextClassName}`}>
+                Correo Argentino suma un cargo fijo único de {formatArs(correoArgentinoFeeTotal)} por pedido.
               </p>
             </section>
           ) : null}
         </div>
 
         <div className="border-t border-white/10 px-5 py-4 sm:px-6">
-          <Link href={items.length > 0 ? "/checkout" : "/catalogo"} onClick={handleClose} className={`${solidCtaClassName} w-full`}>
-            {items.length === 0 ? "Explorar catálogo" : "Abrir checkout completo"}
+          <Link href={items.length > 0 ? "/login" : "/catalogo"} onClick={handleClose} className={`${solidCtaClassName} w-full`}>
+            {items.length === 0 ? "Explorar catálogo" : "Continuar compra"}
           </Link>
 
-          <p className="mt-3 text-xs leading-5 text-slate-400">
-            {items.length === 0
-              ? "El carrito todavía está vacío."
-              : "El carrito sigue editable acá, pero el cierre del pedido ahora vive en una ruta dedicada."}
-          </p>
+          {items.length === 0 ? <p className="mt-3 text-xs leading-5 text-slate-400">El carrito todavía está vacío.</p> : null}
         </div>
       </aside>
+
     </div>
   );
 }
