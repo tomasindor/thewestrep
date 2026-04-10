@@ -15,9 +15,9 @@
 
 ## Phase 3: Core Implementation - Ingestion
 - [x] 3.1 Create `lib/imports/ingestion.ts` shared service with: parseYupooUrl, downloadImage, generateVariants, storeInR2, createStagingRecords
-- [ ] 3.2 Create `lib/imports/promotion.ts` with: promoteImportItem, copyToProducts, createProductImages, preserveSizeGuides, updateProductImageUrls
+- [x] 3.2 Create `lib/imports/promotion.ts` with: promoteImportItem, copyToProducts, createProductImages, preserveSizeGuides, updateProductImageUrls
 - [x] 3.3 Modify `scripts/import-yupoo.ts` to call `lib/imports/ingestion.ts` instead of direct DB writes
-- [ ] 3.4 Add single-item import endpoint in admin that calls `lib/imports/ingestion.ts`
+- [x] 3.4 Add single-item import endpoint in admin that calls `lib/imports/ingestion.ts`
 
 ## Phase 4: Admin Curation UI
 - [ ] 4.1 Create `app/admin/(protected)/imports/page.tsx` with: image grid, state indicators (pending/approved/rejected), approve/reject buttons
