@@ -5,6 +5,7 @@ import { createAdminSingleItemImportHandler } from "../../app/api/admin/imports/
 
 test("admin single import route requires URL and returns ingestion payload", async () => {
   let ingestedUrl = "";
+  let receivedDependencies: Record<string, unknown> | undefined;
 
   const handler = createAdminSingleItemImportHandler({
     requireAdminSession: async () => ({ user: { id: "admin-1" } }),
@@ -21,9 +22,11 @@ test("admin single import route requires URL and returns ingestion payload", asy
           };
         },
       } as never,
+      storeInR2: async () => undefined,
     }),
-    ingestYupooSource: async (input) => {
+    ingestYupooSource: async (input, dependencies) => {
       ingestedUrl = input.sourceUrl;
+      receivedDependencies = dependencies as unknown as Record<string, unknown> | undefined;
       return {
         importJobId: "job-1",
         importItemId: "item-1",
@@ -53,6 +56,7 @@ test("admin single import route requires URL and returns ingestion payload", asy
 
   assert.equal(response.status, 200);
   assert.equal(ingestedUrl, "https://deateath.x.yupoo.com/albums/111?uid=1");
+  assert.equal(typeof receivedDependencies?.storeInR2, "function");
 
   const payload = (await response.json()) as { ok: boolean; data: { importJobId: string } };
   assert.equal(payload.ok, true);
@@ -75,6 +79,7 @@ test("admin single import route returns 500 when ingestion fails", async () => {
           };
         },
       } as never,
+      storeInR2: async () => undefined,
     }),
     ingestYupooSource: async () => {
       throw new Error("boom");

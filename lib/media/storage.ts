@@ -1,5 +1,3 @@
-import "server-only";
-
 export interface R2StorageClient {
   putObject(input: {
     Bucket: string;

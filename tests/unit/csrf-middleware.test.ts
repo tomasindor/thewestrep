@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test, { afterEach } from "node:test";
 
-import { middleware } from "../../middleware";
+import { proxy } from "../../proxy";
 
 const originalNextauthUrl = process.env.NEXTAUTH_URL;
 
@@ -30,7 +30,7 @@ function makeMockRequest(
     method,
     headers,
     nextUrl: url,
-  } as Parameters<typeof middleware>[0];
+  } as Parameters<typeof proxy>[0];
 }
 
 // ── Same-origin request allowed ──
@@ -42,7 +42,7 @@ test("same-origin POST request is allowed", () => {
     host: "thewestrep.com",
   });
 
-  const res = middleware(req);
+  const res = proxy(req);
   assert.notEqual(res?.status, 403, "should pass through (no 403 response)");
 });
 
@@ -55,7 +55,7 @@ test("cross-origin POST request is blocked with 403", async () => {
     host: "thewestrep.com",
   });
 
-  const res = middleware(req);
+  const res = proxy(req);
   assert.equal(res?.status, 403);
   const body = await res.json();
   assert.equal(body.error, "Forbidden: invalid origin");
@@ -70,7 +70,7 @@ test("missing origin AND referer headers is blocked with 403", async () => {
     host: "thewestrep.com",
   });
 
-  const res = middleware(req);
+  const res = proxy(req);
   assert.equal(res?.status, 403, "should block when both origin and referer are missing");
   const body = await res.json();
   assert.equal(body.error, "Forbidden: invalid origin");
@@ -88,9 +88,9 @@ test("missing origin but valid referer is allowed", () => {
     method: "POST",
     headers,
     nextUrl: url,
-  } as Parameters<typeof middleware>[0];
+  } as Parameters<typeof proxy>[0];
 
-  const res = middleware(req);
+  const res = proxy(req);
   assert.notEqual(res?.status, 403, "should allow when referer host matches");
 });
 
@@ -106,9 +106,9 @@ test("missing origin but cross-origin referer is blocked with 403", async () => 
     method: "POST",
     headers,
     nextUrl: url,
-  } as Parameters<typeof middleware>[0];
+  } as Parameters<typeof proxy>[0];
 
-  const res = middleware(req);
+  const res = proxy(req);
   assert.equal(res?.status, 403, "should block when referer host does not match");
 });
 
@@ -121,7 +121,7 @@ test("GET request bypasses origin check entirely", () => {
     host: "thewestrep.com",
   });
 
-  const res = middleware(req);
+  const res = proxy(req);
   assert.notEqual(res?.status, 403, "GET should always pass through");
 });
 
@@ -134,7 +134,7 @@ test("register endpoint bypasses origin check", () => {
     host: "thewestrep.com",
   });
 
-  const res = middleware(req);
+  const res = proxy(req);
   assert.notEqual(res?.status, 403, "register should pass through");
 });
 
@@ -147,7 +147,7 @@ test("auth endpoints bypass origin check", () => {
     host: "thewestrep.com",
   });
 
-  const res = middleware(req);
+  const res = proxy(req);
   assert.notEqual(res?.status, 403, "auth endpoints should pass through");
 });
 
@@ -162,7 +162,7 @@ test("NEXTAUTH_URL origin is allowed", () => {
     host: "thewestrep.com",
   });
 
-  const res = middleware(req);
+  const res = proxy(req);
   assert.notEqual(res?.status, 403, "NEXTAUTH_URL origin should be allowed");
 });
 
@@ -175,7 +175,7 @@ test("DELETE request is validated for origin", async () => {
     host: "thewestrep.com",
   });
 
-  const res = middleware(req);
+  const res = proxy(req);
   assert.equal(res?.status, 403);
 });
 
@@ -186,7 +186,7 @@ test("PUT request is validated for origin", async () => {
     host: "thewestrep.com",
   });
 
-  const res = middleware(req);
+  const res = proxy(req);
   assert.equal(res?.status, 403);
 });
 
@@ -197,7 +197,7 @@ test("PATCH request is validated for origin", async () => {
     host: "thewestrep.com",
   });
 
-  const res = middleware(req);
+  const res = proxy(req);
   assert.equal(res?.status, 403);
 });
 
@@ -210,6 +210,6 @@ test("OPTIONS request bypasses origin check", () => {
     host: "thewestrep.com",
   });
 
-  const res = middleware(req);
+  const res = proxy(req);
   assert.notEqual(res?.status, 403, "OPTIONS should always pass through");
 });

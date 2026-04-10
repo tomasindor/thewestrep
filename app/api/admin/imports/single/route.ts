@@ -1,4 +1,5 @@
 import { getDb } from "@/lib/db/core";
+import { createBulkIngestionDependencies } from "@/lib/imports/bulk-r2-wiring";
 import { ingestYupooSource, type YupooIngestionResult } from "@/lib/imports/ingestion";
 import { logger } from "@/lib/logger";
 
@@ -24,8 +25,8 @@ interface AdminSingleItemImportDeps {
     sourceReference?: string;
     productData?: Record<string, unknown>;
     maxImages?: number;
-  }, dependencies?: { db: NonNullable<ReturnType<typeof getDb>> }) => Promise<YupooIngestionResult>;
-  getIngestionDependencies?: () => { db: NonNullable<ReturnType<typeof getDb>> } | null;
+  }, dependencies: Parameters<typeof ingestYupooSource>[1]) => Promise<YupooIngestionResult>;
+  getIngestionDependencies: () => Parameters<typeof ingestYupooSource>[1] | null;
   logError: (event: string, context: Record<string, unknown>) => void;
 }
 
@@ -39,7 +40,7 @@ export function createAdminSingleItemImportHandler(overrides: Partial<AdminSingl
     ingestYupooSource,
     getIngestionDependencies: () => {
       const db = getDb();
-      return db ? { db } : null;
+      return db ? createBulkIngestionDependencies(db) : null;
     },
     logError: logger.error,
     ...overrides,
@@ -56,9 +57,9 @@ export function createAdminSingleItemImportHandler(overrides: Partial<AdminSingl
         return Response.json({ error: "Falta la URL de Yupoo." }, { status: 400 });
       }
 
-      const ingestionDeps = dependencies.getIngestionDependencies?.();
+      const ingestionDeps = dependencies.getIngestionDependencies();
 
-      if (dependencies.getIngestionDependencies && !ingestionDeps) {
+      if (!ingestionDeps) {
         return Response.json({ error: "Database not configured. Set DATABASE_URL in your environment." }, { status: 500 });
       }
 
@@ -70,7 +71,7 @@ export function createAdminSingleItemImportHandler(overrides: Partial<AdminSingl
           productData: body.productData,
           maxImages: body.maxImages,
         },
-        ingestionDeps ?? undefined,
+        ingestionDeps,
       );
 
       return Response.json({ ok: true, data: result });

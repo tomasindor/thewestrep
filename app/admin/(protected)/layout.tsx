@@ -6,6 +6,7 @@ import { eyebrowAccentClassName, navLinkClassName } from "@/lib/ui";
 
 const adminNavItems = [
   { href: "/admin/products", label: "Productos" },
+  { href: "/admin/imports", label: "Importaciones" },
   { href: "/admin/brands", label: "Marcas" },
   { href: "/admin/categories", label: "Categorías" },
 ];

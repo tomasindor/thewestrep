@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { importImages, importItems, importJobs } from "../../lib/db/schema";
 import { buildBulkIngestionInput, ingestYupooSource, parseYupooUrl } from "../../lib/imports/ingestion";
+import type { GenerateImageVariantsResult } from "../../lib/media/variants";
 
 function createFakeDb() {
   const inserts: Array<{ table: unknown; values: unknown }> = [];
@@ -34,7 +35,7 @@ function createFakeDb() {
   };
 }
 
-function createGenerateVariantsResult(originalKey: string) {
+function createGenerateVariantsResult(originalKey: string): GenerateImageVariantsResult {
   const variantNames = ["thumb", "cart-thumb", "card", "detail", "lightbox", "admin-preview"] as const;
 
   const variants = Object.fromEntries(
@@ -57,7 +58,7 @@ function createGenerateVariantsResult(originalKey: string) {
       height: 500,
     },
     variants,
-  };
+  } as GenerateImageVariantsResult;
 }
 
 test("parseYupooUrl normalizes https and rejects non-yupoo hosts", () => {

@@ -20,12 +20,12 @@
 - [x] 3.4 Add single-item import endpoint in admin that calls `lib/imports/ingestion.ts`
 
 ## Phase 4: Admin Curation UI
-- [ ] 4.1 Create `app/admin/(protected)/imports/page.tsx` with: image grid, state indicators (pending/approved/rejected), approve/reject buttons
-- [ ] 4.2 Add keyboard navigation (arrow keys) for rapid image review
-- [ ] 4.3 Implement Ctrl+Z undo for last discard action (store action history in React state)
-- [ ] 4.4 Create `app/api/admin/imports/route.ts` with POST handler for approve/reject/restore actions
-- [ ] 4.5 Implement automatic cover selection: first approved image becomes product cover
-- [ ] 4.6 Add cover reflow when current cover is rejected
+- [x] 4.1 Create `app/admin/(protected)/imports/page.tsx` with: image grid, state indicators (pending/approved/rejected), approve/reject buttons
+- [x] 4.2 Add keyboard navigation (arrow keys) for rapid image review
+- [x] 4.3 Implement Ctrl+Z undo for last discard action (store action history in React state)
+- [x] 4.4 Create `app/api/admin/imports/route.ts` with POST handler for approve/reject/restore actions
+- [x] 4.5 Implement automatic cover selection: first approved image becomes product cover
+- [x] 4.6 Add cover reflow when current cover is rejected
 
 ## Phase 5: Promotion Logic
 - [ ] 5.1 Add promotion action to admin UI (button to promote approved items to catalog)
@@ -40,10 +40,15 @@
 - [ ] 6.4 Prevent automatic deletion of similar images
 
 ## Phase 7: Testing & Verification
-- [ ] 7.1 Write unit tests for `lib/media/storage.ts` (mock R2, verify put/get/delete)
+- [x] 7.1 Write unit tests for `lib/media/storage.ts` (mock R2, verify put/get/delete)
 - [ ] 7.2 Write unit tests for `lib/media/variants.ts` (verify 6 variants generated from buffer)
 - [ ] 7.3 Write integration tests for `lib/imports/ingestion.ts` (mock fetch to Yupoo fixture, verify staging rows)
 - [ ] 7.4 Write integration tests for `lib/imports/promotion.ts` (verify correct inserts to products/product_images)
 - [ ] 7.5 Write E2E test: admin approves item -> verify promoted to catalog with R2 URLs
 - [ ] 7.6 Write test: size-guide images hidden from storefront but visible in admin
 - [ ] 7.7 Verify backward compatibility: existing catalog images still work after migration
+
+## Evidence Notes (blocking-fixes before commit split)
+- 3.4 / single-item route parity: admin single import now injects the same concrete R2 dependency boundary used by bulk ingestion (`createBulkIngestionDependencies`) while keeping `ingestYupooSource` generic.
+- 4.3 / undo semantics: restore now honors previous persisted state (from Ctrl+Z stack + API payload `previousState`) instead of always mapping to `pending`.
+- Type safety gate: `npm run typecheck` is green after resolving Phase 4/R2-introduced typing breaks and associated compile blockers.

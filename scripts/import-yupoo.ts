@@ -3,6 +3,7 @@
  * 
  * Uso: npx tsx scripts/import-yupoo.ts
  * Limitar páginas: npx tsx scripts/import-yupoo.ts --pages=1
+ * Limitar productos: npx tsx scripts/import-yupoo.ts --pages=1 --limit=10
  */
 
 import * as cheerio from "cheerio";
@@ -12,6 +13,7 @@ import { createId, slugify } from "@/lib/utils";
 import { loadCliEnv } from "@/lib/env/load-cli";
 import { canonicalizeYupooImageCandidates, getYupooCanonicalKey } from "@/lib/yupoo-core";
 import { buildBulkIngestionInput, ingestYupooSource } from "@/lib/imports/ingestion";
+import { createBulkIngestionDependencies } from "@/lib/imports/bulk-r2-wiring";
 
 // =====================================================
 // MAPA DE MARCAS CAMUFLADAS → NOMBRES REALES
@@ -979,7 +981,7 @@ async function processAlbum(
       },
     });
 
-    await ingestYupooSource(ingestionInput, { db });
+    await ingestYupooSource(ingestionInput, createBulkIngestionDependencies(db));
 
     return { success: true, brand: brandName, category: garmentType };
   } catch (error) {
@@ -1004,7 +1006,9 @@ async function main() {
 
   const totalAvailablePages = await getTotalPages();
   const pagesArg = process.argv.find((arg) => arg.startsWith("--pages="));
+  const limitArg = process.argv.find((arg) => arg.startsWith("--limit="));
   const maxPages = pagesArg ? parseInt(pagesArg.split("=")[1], 10) : totalAvailablePages;
+  const maxProducts = limitArg ? parseInt(limitArg.split("=")[1], 10) : null;
   const totalPages = Math.min(maxPages, totalAvailablePages);
 
   console.log(`📄 Páginas: ${totalPages}/${totalAvailablePages}\n`);
@@ -1039,15 +1043,19 @@ async function main() {
     return !esInfo && !esCategoria && !esCalzado && album.title.length > 5;
   });
 
-  console.log(`📋 Para importar: ${albumesValidos.length}\n`);
+  const albumesAImportar = maxProducts && Number.isFinite(maxProducts)
+    ? albumesValidos.slice(0, Math.max(0, maxProducts))
+    : albumesValidos;
+
+  console.log(`📋 Para importar: ${albumesAImportar.length}${maxProducts ? ` (limitado a ${albumesAImportar.length})` : ""}\n`);
 
   // Procesar
   let ok = 0, err = 0;
   const brandCounts = new Map<string, number>();
   const errors: Array<{ album: string; error: string }> = [];
 
-  for (let i = 0; i < albumesValidos.length; i += BATCH_SIZE) {
-    const batch = albumesValidos.slice(i, i + BATCH_SIZE);
+  for (let i = 0; i < albumesAImportar.length; i += BATCH_SIZE) {
+    const batch = albumesAImportar.slice(i, i + BATCH_SIZE);
     const results = await Promise.all(batch.map(album => processAlbum(album, db)));
 
     for (let j = 0; j < results.length; j++) {
@@ -1061,10 +1069,10 @@ async function main() {
       }
     }
 
-    const progress = Math.min(i + BATCH_SIZE, albumesValidos.length);
-    console.log(`⚙️  ${progress}/${albumesValidos.length} - ✅ ${ok} - ❌ ${err}`);
+    const progress = Math.min(i + BATCH_SIZE, albumesAImportar.length);
+    console.log(`⚙️  ${progress}/${albumesAImportar.length} - ✅ ${ok} - ❌ ${err}`);
 
-    if (i + BATCH_SIZE < albumesValidos.length) await sleep(DELAY_MS);
+    if (i + BATCH_SIZE < albumesAImportar.length) await sleep(DELAY_MS);
   }
 
   // Resumen por marca

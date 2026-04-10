@@ -10,8 +10,8 @@ function createPromotionFixture() {
     findProductBySlug: [] as string[],
     createProduct: [] as Array<Record<string, unknown>>,
     updateProduct: [] as Array<{ productId: string; values: Record<string, unknown> }>,
-    insertProductImage: [] as Array<Record<string, unknown>>,
-    upsertProductSizeGuide: [] as Array<Record<string, unknown>>,
+    insertProductImage: [] as unknown[],
+    upsertProductSizeGuide: [] as unknown[],
   };
 
   const service = createPromotionFoundation({

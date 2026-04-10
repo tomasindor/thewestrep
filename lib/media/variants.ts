@@ -1,5 +1,3 @@
-import "server-only";
-
 import sharp from "sharp";
 
 export type ImageVariantName = "thumb" | "cart-thumb" | "card" | "detail" | "lightbox" | "admin-preview";
