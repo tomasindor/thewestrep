@@ -26,17 +26,14 @@ test("schema exports staging import tables for jobs, items, and images", () => {
   assert.ok(importItems.importJobId);
   assert.ok(importItems.status);
   assert.ok(importItems.productData);
+  assert.ok(importItems.price);
 
   assert.ok(importImages.id);
   assert.ok(importImages.importItemId);
-  assert.ok(importImages.originalUrl);
-  assert.ok(importImages.sourceYupooUrl);
-  assert.ok(importImages.r2Key);
-  assert.ok(importImages.variantsManifest);
+  assert.ok(importImages.sourceUrl);
   assert.ok(importImages.order);
   assert.ok(importImages.reviewState);
   assert.ok(importImages.isSizeGuide);
-  assert.ok(importImages.similarityMetadata);
 
   assert.ok(productImages.variantsManifest);
 });
@@ -44,7 +41,7 @@ test("schema exports staging import tables for jobs, items, and images", () => {
 test("schema exports import enums with required states", () => {
   assert.deepEqual(importJobsStatusEnum.enumValues, ["running", "completed", "failed"]);
   assert.deepEqual(importJobsSourceEnum.enumValues, ["admin", "bulk"]);
-  assert.deepEqual(importItemsStatusEnum.enumValues, ["pending", "approved", "rejected"]);
+  assert.deepEqual(importItemsStatusEnum.enumValues, ["pending", "approved", "rejected", "promoted", "media_failed"]);
   assert.deepEqual(importImagesReviewStateEnum.enumValues, ["pending", "approved", "rejected"]);
 });
 

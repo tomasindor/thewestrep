@@ -15,7 +15,7 @@ export const productStateEnum = pgEnum("product_state", ["draft", "published", "
 export const productImageSourceEnum = pgEnum("product_image_source", ["manual", "yupoo"]);
 export const importJobsStatusEnum = pgEnum("import_job_status", ["running", "completed", "failed"]);
 export const importJobsSourceEnum = pgEnum("import_job_source", ["admin", "bulk"]);
-export const importItemsStatusEnum = pgEnum("import_item_status", ["pending", "approved", "rejected"]);
+export const importItemsStatusEnum = pgEnum("import_item_status", ["pending", "approved", "rejected", "promoted", "media_failed"]);
 export const importImagesReviewStateEnum = pgEnum("import_image_review_state", ["pending", "approved", "rejected"]);
 export const orderCheckoutModeEnum = pgEnum("order_checkout_mode", ["guest", "account"]);
 export const orderAuthProviderEnum = pgEnum("order_auth_provider", ["guest", "credentials", "google"]);
@@ -218,8 +218,9 @@ export const importItems = pgTable("import_items", {
   importJobId: text("import_job_id")
     .notNull()
     .references(() => importJobs.id, { onDelete: "cascade" }),
-  status: importItemsStatusEnum("status").notNull().default("pending"),
+  status: importItemsStatusEnum("status").notNull().default("approved"),
   productData: jsonb("product_data").$type<Record<string, unknown> | null>(),
+  price: integer("price"),
   ...timestamps,
 });
 
@@ -228,14 +229,11 @@ export const importImages = pgTable("import_images", {
   importItemId: text("import_item_id")
     .notNull()
     .references(() => importItems.id, { onDelete: "cascade" }),
-  originalUrl: text("original_url").notNull(),
-  sourceYupooUrl: text("source_yupoo_url"),
-  r2Key: text("r2_key").notNull(),
-  variantsManifest: jsonb("variants_manifest").$type<ImageVariantsManifest | null>(),
-  order: integer("order").notNull().default(0),
-  reviewState: importImagesReviewStateEnum("review_state").notNull().default("pending"),
+  sourceUrl: text("source_url").notNull(),
+  previewUrl: text("preview_url"),
+  reviewState: importImagesReviewStateEnum("review_state").notNull().default("approved"),
   isSizeGuide: boolean("is_size_guide").notNull().default(false),
-  similarityMetadata: jsonb("similarity_metadata").$type<Record<string, unknown> | null>(),
+  order: integer("order").notNull().default(0),
   ...timestamps,
 });
 

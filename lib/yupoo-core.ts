@@ -14,6 +14,11 @@ const YUPOO_VARIANT_TOKENS = ["square", "small", "medium", "big", "original"] as
 
 type YupooVariantToken = (typeof YUPOO_VARIANT_TOKENS)[number] | "raw";
 
+export interface YupooImageCandidate {
+  url: string;
+  previewUrl: string;
+}
+
 function normalizeImageUrl(value: string | undefined | null) {
   const normalized = value?.trim();
 
@@ -204,10 +209,50 @@ export async function extractYupooImages(sourceUrl: string, options?: { maxImage
   const html = await response.text();
   const $ = cheerio.load(html);
   const collected = new Set<string>();
+  const previewByCanonicalKey = new Map<string, string>();
+
+  const registerPreviewCandidate = (sourceCandidate: string, previewCandidate?: string | null) => {
+    const normalizedSource = normalizeImageUrl(sourceCandidate);
+
+    if (!normalizedSource || !isLikelyProductImage(normalizedSource)) {
+      return;
+    }
+
+    collected.add(normalizedSource);
+
+    if (!previewCandidate) {
+      return;
+    }
+
+    const normalizedPreview = normalizeImageUrl(previewCandidate);
+
+    if (!normalizedPreview || !isLikelyProductImage(normalizedPreview)) {
+      return;
+    }
+
+    try {
+      const canonicalKey = getYupooCanonicalKey(normalizedSource);
+
+      if (!previewByCanonicalKey.has(canonicalKey)) {
+        previewByCanonicalKey.set(canonicalKey, normalizedPreview);
+      }
+    } catch {
+      // Ignore malformed URLs; source candidate already validated.
+    }
+  };
 
   const attributes = ["data-origin-src", "data-src", "src", "href"];
 
   $("img, a").each((_, element) => {
+    const previewFromElement = normalizeImageUrl($(element).attr("src") ?? $(element).attr("data-src"));
+    const preferredSource = normalizeImageUrl($(element).attr("data-origin-src"))
+      ?? normalizeImageUrl($(element).attr("href"))
+      ?? previewFromElement;
+
+    if (preferredSource) {
+      registerPreviewCandidate(preferredSource, previewFromElement);
+    }
+
     for (const attribute of attributes) {
       const value = $(element).attr(attribute);
       const normalized = normalizeImageUrl(value);
@@ -232,6 +277,21 @@ export async function extractYupooImages(sourceUrl: string, options?: { maxImage
   const maxImages = options?.maxImages ?? 24;
   const limitedImages = maxImages > 0 ? images.slice(0, maxImages) : images;
 
+  const imageCandidates: YupooImageCandidate[] = limitedImages.map((imageUrl) => {
+    try {
+      const canonicalKey = getYupooCanonicalKey(imageUrl);
+      return {
+        url: imageUrl,
+        previewUrl: previewByCanonicalKey.get(canonicalKey) ?? imageUrl,
+      };
+    } catch {
+      return {
+        url: imageUrl,
+        previewUrl: imageUrl,
+      };
+    }
+  });
+
   if (limitedImages.length === 0) {
     throw new Error(
       "No encontramos imágenes confiables en el HTML de Yupoo. Usá la URL fuente y cargá imágenes manuales como fallback.",
@@ -241,6 +301,7 @@ export async function extractYupooImages(sourceUrl: string, options?: { maxImage
   return {
     sourceUrl,
     images: limitedImages,
+    imageCandidates,
     method: "html-scrape" as const,
   };
 }

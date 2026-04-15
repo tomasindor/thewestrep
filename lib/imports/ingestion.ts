@@ -2,10 +2,10 @@ import { eq } from "drizzle-orm";
 
 import { isLikelySizeGuideImageUrl, reorderLikelySizeGuideImageUrls } from "@/lib/catalog/size-guides";
 import { importImages, importItems, importJobs } from "@/lib/db/schema";
-import { generateImageVariants, mapVariantNameToManifestField, type GenerateImageVariantsResult } from "@/lib/media/variants";
-import type { ImageVariantsManifest } from "@/lib/types/media";
+import { classifyImportImageCandidate } from "@/lib/imports/heuristics";
+import { validateImportPrice } from "@/lib/imports/price-validator";
 import { createId } from "@/lib/utils";
-import { canonicalizeYupooImageCandidates, extractYupooImages } from "@/lib/yupoo-core";
+import { canonicalizeYupooImageCandidates, extractYupooImages, getYupooCanonicalKey } from "@/lib/yupoo-core";
 
 export type YupooImportSource = "bulk" | "admin";
 
@@ -23,6 +23,11 @@ export interface DownloadedImage {
   contentType?: string;
 }
 
+export interface IngestionImageCandidate {
+  url: string;
+  previewUrl: string;
+}
+
 export interface PreparedR2Write {
   key: string;
   body: Buffer;
@@ -38,18 +43,24 @@ export interface IngestionDependencies {
   };
   now?: () => Date;
   idFactory?: (prefix: string) => string;
-  scrapeYupooImages?: (sourceUrl: string, options?: { maxImages?: number }) => Promise<string[]>;
+  scrapeYupooImages?: (
+    sourceUrl: string,
+    options?: { maxImages?: number },
+  ) => Promise<Array<string | { url: string; previewUrl?: string | null }>>;
   downloadImage?: (url: string) => Promise<DownloadedImage>;
-  generateVariants?: (input: { source: Buffer; originalKey: string }) => Promise<GenerateImageVariantsResult>;
+  generateVariants?: (input: { source: Buffer; originalKey: string }) => Promise<unknown>;
   storeInR2?: (write: PreparedR2Write) => Promise<void>;
 }
 
 export interface YupooIngestionResult {
-  importJobId: string;
-  importItemId: string;
+  importJobId: string | null;
+  importItemId: string | null;
   importedImages: number;
   skippedDuplicateImages: number;
+  skippedHeuristicImages?: number;
   plannedR2Writes: number;
+  skipped: boolean;
+  skipReason?: "missing-price" | "insufficient-useful-images";
 }
 
 export interface LegacyBulkAlbumPayload {
@@ -60,39 +71,6 @@ export interface LegacyBulkAlbumPayload {
 }
 
 const IMMUTABLE_CACHE_CONTROL = "public, max-age=31536000, immutable";
-
-function resolveImageExtension(originalUrl: string, contentType?: string) {
-  if (contentType?.includes("png")) return ".png";
-  if (contentType?.includes("webp")) return ".webp";
-  if (contentType?.includes("jpeg") || contentType?.includes("jpg")) return ".jpg";
-
-  const pathname = new URL(originalUrl).pathname;
-  const extension = pathname.match(/\.(jpe?g|png|webp)(?:$|[?#])/i)?.[1]?.toLowerCase();
-  if (extension === "jpeg") return ".jpg";
-  if (extension === "jpg" || extension === "png" || extension === "webp") return `.${extension}`;
-
-  return ".jpg";
-}
-
-function buildOriginalR2Key(jobId: string, itemId: string, order: number, originalUrl: string, contentType?: string) {
-  const extension = resolveImageExtension(originalUrl, contentType);
-  return `imports/${jobId}/${itemId}/${String(order).padStart(3, "0")}/original${extension}`;
-}
-
-function buildVariantsManifest(generated: GenerateImageVariantsResult): ImageVariantsManifest {
-  const manifestVariants: ImageVariantsManifest["variants"] = {};
-
-  for (const [variantName, variant] of Object.entries(generated.variants)) {
-    manifestVariants[mapVariantNameToManifestField(variantName as keyof typeof generated.variants)] = variant.key;
-  }
-
-  return {
-    original: generated.original.key,
-    variants: manifestVariants,
-    width: generated.original.width,
-    height: generated.original.height,
-  };
-}
 
 export function parseYupooUrl(value: string) {
   let parsed: URL;
@@ -145,7 +123,7 @@ export async function downloadImage(url: string): Promise<DownloadedImage> {
 
 export function prepareR2Writes(
   original: { key: string; body: Buffer; contentType: string; sourceUrl: string },
-  generated: GenerateImageVariantsResult,
+  generated: { variants: Record<string, { key: string; buffer: Buffer; contentType: string }> },
 ) {
   const writes: PreparedR2Write[] = [
     {
@@ -194,11 +172,10 @@ export async function createStagingRecords(
   itemId: string,
   jobId: string,
   imageRows: Array<{
-    originalUrl: string;
-    sourceYupooUrl: string;
-    r2Key: string;
-    variantsManifest: ImageVariantsManifest;
+    sourceUrl: string;
+    previewUrl: string;
     order: number;
+    reviewState: "approved";
     isSizeGuide: boolean;
   }>,
 ) {
@@ -216,8 +193,9 @@ export async function createStagingRecords(
   await dependencies.db.insert(importItems).values({
     id: itemId,
     importJobId: jobId,
-    status: "pending",
+    status: "approved",
     productData: input.productData ?? null,
+    price: typeof input.productData?.priceArs === "number" ? input.productData.priceArs : null,
     createdAt: now,
     updatedAt: now,
   });
@@ -225,62 +203,148 @@ export async function createStagingRecords(
   for (const row of imageRows) {
     await dependencies.db.insert(importImages).values({
       id: (dependencies.idFactory ?? createId)("import-image"),
-      importItemId: itemId,
-      originalUrl: row.originalUrl,
-      sourceYupooUrl: row.sourceYupooUrl,
-      r2Key: row.r2Key,
-      variantsManifest: row.variantsManifest,
-      order: row.order,
-      reviewState: "pending",
-      isSizeGuide: row.isSizeGuide,
-      similarityMetadata: null,
+        importItemId: itemId,
+        sourceUrl: row.sourceUrl,
+        previewUrl: row.previewUrl,
+        order: row.order,
+        reviewState: row.reviewState,
+        isSizeGuide: row.isSizeGuide,
       createdAt: now,
       updatedAt: now,
     });
   }
 }
 
+function normalizeCandidateImage(input: string | { url: string; previewUrl?: string | null }): IngestionImageCandidate | null {
+  if (typeof input === "string") {
+    const trimmed = input.trim();
+
+    if (!trimmed) {
+      return null;
+    }
+
+    return {
+      url: trimmed,
+      previewUrl: trimmed,
+    };
+  }
+
+  const url = typeof input.url === "string" ? input.url.trim() : "";
+
+  if (!url) {
+    return null;
+  }
+
+  const previewUrl = typeof input.previewUrl === "string" && input.previewUrl.trim().length > 0
+    ? input.previewUrl.trim()
+    : url;
+
+  return {
+    url,
+    previewUrl,
+  };
+}
+
 async function resolveCandidateImageUrls(input: YupooIngestionInput, dependencies: IngestionDependencies) {
   if (input.imageUrls?.length) {
-    return input.imageUrls;
+    return input.imageUrls
+      .map((url) => normalizeCandidateImage(url))
+      .filter((candidate): candidate is IngestionImageCandidate => Boolean(candidate));
   }
 
   const scraper = dependencies.scrapeYupooImages
     ?? (async (sourceUrl: string, options?: { maxImages?: number }) => {
       const extracted = await extractYupooImages(sourceUrl, options);
-      return extracted.images;
+      return extracted.imageCandidates.length > 0 ? extracted.imageCandidates : extracted.images;
     });
 
-  return scraper(input.sourceUrl, { maxImages: input.maxImages });
+  const scraped = await scraper(input.sourceUrl, { maxImages: input.maxImages });
+
+  return scraped
+    .map((candidate) => normalizeCandidateImage(candidate))
+    .filter((candidate): candidate is IngestionImageCandidate => Boolean(candidate));
 }
 
 export async function ingestYupooSource(input: YupooIngestionInput, dependencies: IngestionDependencies): Promise<YupooIngestionResult> {
   const sourceUrl = parseYupooUrl(input.sourceUrl);
   const now = dependencies.now?.() ?? new Date();
   const idFactory = dependencies.idFactory ?? createId;
-  const runGenerateVariants = dependencies.generateVariants ?? generateImageVariants;
-  const runDownloadImage = dependencies.downloadImage ?? downloadImage;
   const jobId = idFactory("import-job");
   const itemId = idFactory("import-item");
 
-  const candidates = await resolveCandidateImageUrls({ ...input, sourceUrl: sourceUrl.href }, dependencies);
-  const deduplicated = canonicalizeYupooImageCandidates(candidates);
-  const ordered = reorderLikelySizeGuideImageUrls(deduplicated, { sourcePageUrl: sourceUrl.href });
+  const priceValidation = validateImportPrice(input.productData ?? null);
+  if (!priceValidation.valid) {
+    return {
+      importJobId: null,
+      importItemId: null,
+      importedImages: 0,
+      skippedDuplicateImages: 0,
+      skippedHeuristicImages: 0,
+      plannedR2Writes: 0,
+      skipped: true,
+      skipReason: "missing-price",
+    };
+  }
 
-  if (ordered.length === 0) {
+  const productDataWithPrice = {
+    ...(input.productData ?? {}),
+    finalPrice: priceValidation.price,
+    priceArs: priceValidation.price,
+  };
+
+  const candidates = await resolveCandidateImageUrls({ ...input, sourceUrl: sourceUrl.href }, dependencies);
+  const deduplicated = canonicalizeYupooImageCandidates(candidates.map((candidate) => candidate.url));
+  const ordered = reorderLikelySizeGuideImageUrls(deduplicated, { sourcePageUrl: sourceUrl.href });
+  const filtered = ordered.filter((imageUrl) => classifyImportImageCandidate(imageUrl).decision !== "auto-reject");
+
+  const previewBySourceUrl = new Map<string, string>();
+  const previewByCanonicalKey = new Map<string, string>();
+
+  for (const candidate of candidates) {
+    if (!previewBySourceUrl.has(candidate.url)) {
+      previewBySourceUrl.set(candidate.url, candidate.previewUrl);
+    }
+
+    try {
+      const key = getYupooCanonicalKey(candidate.url);
+
+      if (!previewByCanonicalKey.has(key)) {
+        previewByCanonicalKey.set(key, candidate.previewUrl);
+      }
+    } catch {
+      // Keep source fallback only.
+    }
+  }
+
+  const usefulImagesCount = filtered.reduce((count, imageUrl, index) => {
+    const isSizeGuide = isLikelySizeGuideImageUrl(imageUrl, { index, sourcePageUrl: sourceUrl.href });
+    return isSizeGuide ? count : count + 1;
+  }, 0);
+
+  if (usefulImagesCount < 2) {
+    return {
+      importJobId: null,
+      importItemId: null,
+      importedImages: 0,
+      skippedDuplicateImages: Math.max(0, candidates.map((candidate) => candidate.url).length - ordered.length),
+      skippedHeuristicImages: Math.max(0, ordered.length - filtered.length),
+      plannedR2Writes: 0,
+      skipped: true,
+      skipReason: "insufficient-useful-images",
+    };
+  }
+
+  if (filtered.length === 0) {
     throw new Error("No se encontraron imágenes válidas para ingestión.");
   }
 
   const stagedImageRows: Array<{
-    originalUrl: string;
-    sourceYupooUrl: string;
-    r2Key: string;
-    variantsManifest: ImageVariantsManifest;
+    sourceUrl: string;
+    previewUrl: string;
     order: number;
+    reviewState: "approved";
     isSizeGuide: boolean;
   }> = [];
-
-  const allWrites: PreparedR2Write[] = [];
 
   try {
     await dependencies.db.insert(importJobs).values({
@@ -295,40 +359,32 @@ export async function ingestYupooSource(input: YupooIngestionInput, dependencies
     await dependencies.db.insert(importItems).values({
       id: itemId,
       importJobId: jobId,
-      status: "pending",
-      productData: input.productData ?? null,
+      status: "approved",
+      productData: productDataWithPrice,
+      price: priceValidation.price,
       createdAt: now,
       updatedAt: now,
     });
 
-    for (const [order, imageUrl] of ordered.entries()) {
-      const downloaded = await runDownloadImage(imageUrl);
-      const originalKey = buildOriginalR2Key(jobId, itemId, order, imageUrl, downloaded.contentType);
-      const generated = await runGenerateVariants({
-        source: downloaded.body,
-        originalKey,
-      });
-      const writes = prepareR2Writes(
-        {
-          key: originalKey,
-          body: downloaded.body,
-          contentType: downloaded.contentType ?? "image/jpeg",
-          sourceUrl: imageUrl,
-        },
-        generated,
-      );
-
-      await storeInR2(writes, dependencies.storeInR2);
-      allWrites.push(...writes);
-
-      const variantsManifest = buildVariantsManifest(generated);
-
+    for (const [order, imageUrl] of filtered.entries()) {
       const imageRow = {
-        originalUrl: imageUrl,
-        sourceYupooUrl: sourceUrl.href,
-        r2Key: originalKey,
-        variantsManifest,
+        sourceUrl: imageUrl,
+        previewUrl: (() => {
+          const directPreview = previewBySourceUrl.get(imageUrl);
+
+          if (directPreview) {
+            return directPreview;
+          }
+
+          try {
+            const key = getYupooCanonicalKey(imageUrl);
+            return previewByCanonicalKey.get(key) ?? imageUrl;
+          } catch {
+            return imageUrl;
+          }
+        })(),
         order,
+        reviewState: "approved" as const,
         isSizeGuide: isLikelySizeGuideImageUrl(imageUrl, { index: order, sourcePageUrl: sourceUrl.href }),
       };
 
@@ -337,14 +393,11 @@ export async function ingestYupooSource(input: YupooIngestionInput, dependencies
       await dependencies.db.insert(importImages).values({
         id: idFactory("import-image"),
         importItemId: itemId,
-        originalUrl: imageRow.originalUrl,
-        sourceYupooUrl: imageRow.sourceYupooUrl,
-        r2Key: imageRow.r2Key,
-        variantsManifest: imageRow.variantsManifest,
+        sourceUrl: imageRow.sourceUrl,
+        previewUrl: imageRow.previewUrl,
         order: imageRow.order,
-        reviewState: "pending",
+        reviewState: "approved",
         isSizeGuide: imageRow.isSizeGuide,
-        similarityMetadata: null,
         createdAt: now,
         updatedAt: now,
       });
@@ -360,7 +413,9 @@ export async function ingestYupooSource(input: YupooIngestionInput, dependencies
     importJobId: jobId,
     importItemId: itemId,
     importedImages: stagedImageRows.length,
-    skippedDuplicateImages: Math.max(0, candidates.length - ordered.length),
-    plannedR2Writes: allWrites.length,
+    skippedDuplicateImages: Math.max(0, candidates.map((candidate) => candidate.url).length - ordered.length),
+    skippedHeuristicImages: Math.max(0, ordered.length - filtered.length),
+    plannedR2Writes: 0,
+    skipped: false,
   };
 }

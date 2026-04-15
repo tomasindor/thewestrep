@@ -2,80 +2,92 @@
 
 ## Technical Approach
 
-We will introduce a "Staging Area" (Import Jobs & Items) to decouple Yupoo ingestion from the live catalog. Instead of directly writing to `products` and `productImages`, imports will create `import_items` and download Yupoo images to our owned Cloudflare R2 bucket. Images will be processed into an original and 6 variants. A fast admin curation UI will allow reviewing these staged items, approving or rejecting them. Approved items are then promoted to the live catalog, preserving size guide metadata, while Yupoo delivery at runtime is completely eliminated.
+We will drastically simplify the ingestion pipeline by deferring all media processing until the operator actually approves a product. 
+During the initial scraping/ingestion phase, we will completely eliminate R2 uploads and variant generation. The `import_images` staging table will store both the original Yupoo source URLs and their real preview URLs (extracted during scraping, instead of blindly guessing `*_small.jpg`), and the `/admin/imports` curation UI will render these preview URLs directly via proxy to save bandwidth.
+
+Furthermore, products that lack a price will be dropped immediately before reaching the staging area to prevent unpriceable junk from cluttering the queue. 
+
+After an operator finishes curating and clicks "Promote", the promotion pipeline will download only the active, non-rejected original images, upload them to R2, and generate the required owned variants (`thumb`, `cart-thumb`, `card`, `detail`, `lightbox`, `admin-preview`) exactly once. 
+
+We will also introduce a safe "Clear All Imports" action for operators. Since staging now avoids R2 writes, we can safely and cleanly truncate staging state by deleting `import_jobs` without risking orphaned cloud media.
 
 ## Architecture Decisions
 
-### Decision: Staging Schema vs Direct Draft Insertion
+### Decision: Zero-Media Ingestion
+**Choice**: No R2 uploads or variant generation during `import_items` ingestion.
+**Alternatives considered**: Continue generating `admin-preview` and `original` at ingestion time.
+**Rationale**: Processing media for products that might be rejected wastes bandwidth and R2 storage. Deferring all R2 work until promotion ensures we only pay for what we keep.
 
-**Choice**: Introduce dedicated `import_jobs`, `import_items`, and `import_images` staging tables.
-**Alternatives considered**: Continue inserting directly into `products` with `state='draft'`, and add flags for "needs review".
-**Rationale**: Direct insertion pollutes the live catalog with poorly formatted or rejected scraped data. A dedicated staging schema allows us to store raw scraped payloads, handle brittle image processing asynchronously, and provide a focused, lightning-fast curation queue without bloating product tables with transient state.
+### Decision: Missing-Price Pre-Rejection
+**Choice**: Immediately drop products missing a price before inserting into `import_items`.
+**Alternatives considered**: Stage them and flag them with an error in the curation UI.
+**Rationale**: Products without prices cannot be sold. Dropping them early keeps the curation queue focused on actionable items.
 
-### Decision: R2 Variant Storage & Access
+### Decision: Minimum Image Requirement
+**Choice**: Require at least 2 active (useful) images for promotion eligibility.
+**Alternatives considered**: Allow single-image products.
+**Rationale**: A catalog listing requires multiple angles to be effective. Pre-filtering guarantees products have a sufficient gallery.
 
-**Choice**: Predictable key generation with a metadata manifest stored in a new JSONB column on the image tables.
-**Alternatives considered**: On-the-fly variant generation at the edge (Cloudflare Image Resizing).
-**Rationale**: The proposal requires "fixed variants in R2". Storing a `variants_manifest` JSONB column alongside the asset key allows us to pre-generate sizes at ingestion time, keeping delivery costs flat and decoupling from edge-resizing quotas. We will add a `variants_manifest` JSONB column to both `import_images` and `product_images`.
+### Decision: Explicit Preview URLs from Scraping
+**Choice**: Extract and store the real Yupoo preview URL (`preview_url`) during scraping alongside the original `source_url`, rather than guessing paths via regex (`_small.jpg`).
+**Alternatives considered**: Mutate the `source_url` at proxy time.
+**Rationale**: Yupoo's URL structure can change. Capturing the real preview URL from the DOM (e.g., from `src` vs `data-origin-src`) ensures accurate curation rendering without brittle path manipulation.
 
-### Decision: Unified Ingestion Pipeline
+### Decision: Full Variant Generation at Promotion
+**Choice**: During promotion, we download the original source URL, upload the `original` to R2, and generate all catalog variants.
+**Alternatives considered**: Generate some variants at the edge.
+**Rationale**: Generating all variants at promotion time guarantees the catalog has everything it needs to serve traffic quickly.
 
-**Choice**: Refactor `scripts/import-yupoo.ts` and the Admin single-import endpoint to use a shared `lib/imports/ingestion.ts` service.
-**Alternatives considered**: Maintain two separate import paths.
-**Rationale**: Having a single pipeline ensures both bulk CLI and admin UI imports follow the exact same scraping, R2 upload, and staging logic. The CLI script becomes just a runner that loops and calls the service.
+### Decision: Safe Clear Imports Action
+**Choice**: Implement a bulk "Clear All Imports" action that issues a SQL `DELETE FROM import_jobs` (which cascades to `import_items` and `import_images`).
+**Alternatives considered**: Soft-deleting or tracking orphaned objects.
+**Rationale**: Because the new pipeline strictly avoids R2 uploads during staging, clearing imports is natively safe. Deleting from DB staging tables cleanly wipes the queue without leaving any external artifacts.
 
 ## Data Flow
 
-    [CLI Bulk] or [Admin Single] 
+    [Ingestion Service] ─── (Scrape Yupoo: Extract BOTH original & preview URLs)
+           │
+           ├─▶ (Missing price? Drop product)
+           ├─▶ (Apply heuristics/dedupe, drop junk images)
            │
            ▼
-    [Ingestion Service] ─── (Scrape Yupoo) ───▶ [Yupoo]
+    [Staging Tables] (import_images stores source_url AND preview_url)
            │
            ▼
-    [R2 Storage Service] ── (Download & Resize) ──▶ [Cloudflare R2]
-           │                                          (Original + Variants)
+    [Admin Curation UI] (Renders proxy URLs mapped to stored preview_url)
+           │ (Handles single-item or bulk promote, tracks carousel position)
+           │ (Allows Operator to "Clear All" -> safely deletes import_jobs)
            ▼
-    [Staging Tables] (import_jobs, import_items, import_images)
-           │
+    [Promotion Service] ── (Download active original images) ──▶ [Cloudflare R2]
+           │               (Generate all variants)
            ▼
-    [Admin Curation UI] (Approve/Reject/Restore)
-           │
-           ▼ (If Approved)
-    [Promotion Service] ──▶ [Catalog Tables] (products, product_images, size_guides)
+    [Catalog Tables] (products, product_images with full R2 manifest)
 
 ## File Changes
 
 | File | Action | Description |
 |------|--------|-------------|
-| `lib/db/schema.ts` | Modify | Add `import_jobs`, `import_items`, `import_images` tables. Add `variants_manifest` JSONB to `product_images`. |
-| `lib/media/storage.ts` | Create | S3 client wrapper for Cloudflare R2 operations (put, get, delete). |
-| `lib/media/variants.ts` | Create | Image processing logic (via `sharp` or similar) to generate the variants. |
-| `lib/imports/ingestion.ts` | Create | Shared pipeline: scrape → download → process → insert to staging. |
-| `lib/imports/promotion.ts` | Create | Logic to map an approved `import_item` to catalog tables. |
-| `scripts/import-yupoo.ts` | Modify | Strip DB writes; call `lib/imports/ingestion.ts` instead. |
-| `app/admin/(protected)/imports/page.tsx` | Create | Admin queue UI for reviewing staging items. |
-| `app/api/admin/imports/route.ts` | Create | API for queue actions (approve, reject). |
-| `lib/env/shared.ts` | Modify | Add R2 credentials (`R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME`). |
+| `lib/db/schema.ts` | Modify | Add `previewUrl` to `import_images` table schema. |
+| `lib/yupoo-core.ts` | Modify | Update `extractYupooImages` to return an object with both `url` (original) and `previewUrl` instead of just an array of strings. |
+| `lib/imports/ingestion.ts` | Modify | Update ingestion to persist the extracted `previewUrl`. Add check to drop products missing a price. |
+| `lib/imports/promotion.ts` | Modify | Download source Yupoo image, upload `original` to R2, generate all variants. Enforce 2-image minimum. |
+| `components/admin/imports-review-client.tsx` | Modify | Add single-item promote button and "Clear All Imports" button. Add current-position indicator to carousel. Ensure queue-state stability when last image is rejected (index fallback). |
+| `app/api/admin/imports/proxy/route.ts` | Modify | Remove regex path mutation; proxy the stored `previewUrl` directly. |
+| `app/api/admin/imports/clear/route.ts` | Create | New route handler to safely `DELETE FROM import_jobs` based on user action. |
 
 ## Interfaces / Contracts
 
 ```typescript
-export type ImportJobStatus = "running" | "completed" | "failed";
-export type ImportItemStatus = "pending" | "approved" | "rejected" | "restored" | "promoted";
+export interface ImportImageCandidate {
+  url: string;        // The original high-res image URL
+  previewUrl: string; // The smaller preview image URL from Yupoo
+}
 
-// New JSONB manifest for images
-export interface ImageVariantsManifest {
-  original: string; // r2 key
-  variants: {
-    square?: string;
-    small?: string;
-    medium?: string;
-    large?: string;
-    xlarge?: string;
-    blurhash?: string;
-  };
-  width: number;
-  height: number;
+export interface ImportItemMetadata {
+  name: string;
+  price?: number; // Must be present to reach staging
+  brand?: string;
+  activeCount: number; // Must be >= 2 for promotion
 }
 ```
 
@@ -83,19 +95,15 @@ export interface ImageVariantsManifest {
 
 | Layer | What to Test | Approach |
 |-------|-------------|----------|
-| Unit | Variant Generation | Mock R2, ensure variants are generated correctly for a sample image buffer. |
-| Integration | Ingestion Pipeline | Run ingestion service with mocked fetch against a sample Yupoo HTML fixture, verify staging rows are created. |
-| Integration | Promotion Logic | Promote a mock `import_item` and verify it correctly inserts into `products` and creates size guides. |
-| E2E | Curation Queue | Admin approves an item -> verify item status changes to `promoted` and catalog receives data. |
+| Unit | Ingestion | Verify missing-price products are discarded before DB insert. Verify `previewUrl` is stored. |
+| Unit | Promotion | Verify promotion downloads source, uploads to R2, generates variants, and enforces 2-image minimum. |
+| E2E | Curation UI | Verify carousel handles last-image rejection without crashing and renders single promote action. Verify "Clear All" correctly purges the queue. |
+| Integration | Admin API | Verify `/api/admin/imports/clear` safely removes staging records. |
 
 ## Migration / Rollout
 
-1. **Schema Migration**: Add staging tables and new R2 columns to image tables.
-2. **Env Setup**: Provision Cloudflare R2 bucket and add secrets to `.env`.
-3. **Pipeline Deployment**: Ship the new ingestion service and admin queue. Hide behind an admin flag if necessary.
-4. **Transition**: Existing catalog images (remote Yupoo URLs) continue to work because `product_images.source` and `url` remain intact. New images will use `provider: 'r2'` and rely on the manifest. No immediate data migration required for old images.
+No immediate data migration required. Old staged items with existing previews can still be processed (they might lack `previewUrl`, so we fallback to original or derived for backwards compatibility if needed during rollout).
 
 ## Open Questions
 
-- [ ] What specific dimensions are required for the 6 variants mentioned in the proposal?
-- [ ] Should we backfill old Yupoo images to R2 in this phase, or leave it for a future slice? (Assuming future slice based on "Rollout: keep existing catalog reads working until promoted assets exist").
+- None

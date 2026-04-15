@@ -32,7 +32,8 @@ test("admin single import route requires URL and returns ingestion payload", asy
         importItemId: "item-1",
         importedImages: 3,
         skippedDuplicateImages: 1,
-        plannedR2Writes: 21,
+        plannedR2Writes: 0,
+        skipped: false,
       };
     },
   });
@@ -56,7 +57,7 @@ test("admin single import route requires URL and returns ingestion payload", asy
 
   assert.equal(response.status, 200);
   assert.equal(ingestedUrl, "https://deateath.x.yupoo.com/albums/111?uid=1");
-  assert.equal(typeof receivedDependencies?.storeInR2, "function");
+  assert.ok(receivedDependencies);
 
   const payload = (await response.json()) as { ok: boolean; data: { importJobId: string } };
   assert.equal(payload.ok, true);

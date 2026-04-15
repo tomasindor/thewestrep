@@ -1,6 +1,7 @@
 import sharp from "sharp";
 
 export type ImageVariantName = "thumb" | "cart-thumb" | "card" | "detail" | "lightbox" | "admin-preview";
+export type CatalogImageVariantName = Exclude<ImageVariantName, "admin-preview">;
 
 interface ImageVariantSpec {
   width: number;
@@ -46,6 +47,24 @@ export interface GenerateImageVariantsResult {
   variants: Record<ImageVariantName, GeneratedImageVariant>;
 }
 
+export interface GeneratePreviewVariantsResult {
+  original: {
+    key: string;
+    width: number;
+    height: number;
+  };
+  variants: Record<"admin-preview", GeneratedImageVariant>;
+}
+
+export interface GenerateCatalogVariantsResult {
+  original: {
+    key: string;
+    width: number;
+    height: number;
+  };
+  variants: Record<CatalogImageVariantName, GeneratedImageVariant>;
+}
+
 function removeExtension(key: string) {
   const lastSlash = key.lastIndexOf("/");
   const lastDot = key.lastIndexOf(".");
@@ -65,16 +84,23 @@ export function mapVariantNameToManifestField(name: ImageVariantName) {
   return MANIFEST_FIELD_MAP[name];
 }
 
-export async function generateImageVariants(input: GenerateImageVariantsInput): Promise<GenerateImageVariantsResult> {
+async function generateVariantsSubset<TName extends ImageVariantName>(
+  input: GenerateImageVariantsInput,
+  variantNames: readonly TName[],
+): Promise<{
+  original: { key: string; width: number; height: number };
+  variants: Record<TName, GeneratedImageVariant>;
+}> {
   const sourceMetadata = await sharp(input.source).metadata();
 
   if (!sourceMetadata.width || !sourceMetadata.height) {
     throw new Error("Could not determine source image dimensions.");
   }
 
-  const variants: Partial<Record<ImageVariantName, GeneratedImageVariant>> = {};
+  const variants: Partial<Record<TName, GeneratedImageVariant>> = {};
 
-  for (const [name, spec] of Object.entries(DEFAULT_IMAGE_VARIANT_SPECS) as Array<[ImageVariantName, ImageVariantSpec]>) {
+  for (const name of variantNames) {
+    const spec = DEFAULT_IMAGE_VARIANT_SPECS[name];
     const transformed = await sharp(input.source)
       .rotate()
       .resize({
@@ -85,7 +111,7 @@ export async function generateImageVariants(input: GenerateImageVariantsInput): 
       .webp({ quality: 85 })
       .toBuffer({ resolveWithObject: true });
 
-    variants[name] = {
+    variants[name as TName] = {
       key: buildVariantKey(input.originalKey, name),
       buffer: transformed.data,
       contentType: "image/webp",
@@ -100,6 +126,29 @@ export async function generateImageVariants(input: GenerateImageVariantsInput): 
       width: sourceMetadata.width,
       height: sourceMetadata.height,
     },
-    variants: variants as Record<ImageVariantName, GeneratedImageVariant>,
+    variants: variants as Record<TName, GeneratedImageVariant>,
+  };
+}
+
+export async function generatePreviewVariants(input: GenerateImageVariantsInput): Promise<GeneratePreviewVariantsResult> {
+  return generateVariantsSubset(input, ["admin-preview"] as const);
+}
+
+export async function generateCatalogVariants(input: GenerateImageVariantsInput): Promise<GenerateCatalogVariantsResult> {
+  return generateVariantsSubset(input, ["thumb", "cart-thumb", "card", "detail", "lightbox"] as const);
+}
+
+export async function generateImageVariants(input: GenerateImageVariantsInput): Promise<GenerateImageVariantsResult> {
+  const [preview, catalog] = await Promise.all([
+    generatePreviewVariants(input),
+    generateCatalogVariants(input),
+  ]);
+
+  return {
+    original: preview.original,
+    variants: {
+      ...catalog.variants,
+      ...preview.variants,
+    },
   };
 }

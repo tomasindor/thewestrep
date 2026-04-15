@@ -4,9 +4,15 @@ import Image from "next/image";
 import { useEffect, useMemo, useState } from "react";
 
 import {
+  applyBulkPromotionResultToQueue,
+  buildReviewImageUrl,
+  formatCarouselPositionLabel,
+  getKeyboardReviewAction,
   getNextKeyboardImageIndex,
   popLastRejectUndo,
   pushRejectUndo,
+  resolveBestActiveItemAfterImageMutation,
+  resolvePrimaryQuickActions,
   type RejectUndoEntry,
 } from "@/lib/imports/admin-curation-ui-state";
 import { compactGhostCtaClassName, compactSolidCtaClassName } from "@/lib/ui";
@@ -16,8 +22,8 @@ type ReviewState = "pending" | "approved" | "rejected";
 interface ImportsReviewImage {
   id: string;
   importItemId: string;
-  originalUrl: string;
-  previewUrl: string;
+  sourceUrl: string;
+  previewUrl: string | null;
   reviewState: ReviewState;
   isSizeGuide: boolean;
   order: number;
@@ -25,10 +31,17 @@ interface ImportsReviewImage {
 
 interface ImportsReviewItem {
   id: string;
-  status: "pending" | "approved" | "rejected";
+  status: "pending" | "approved" | "rejected" | "promoted" | "media_failed";
+  mediaStatus: "pending" | "ready" | "failed";
   sourceReference: string | null;
+  finalName: string | null;
+  finalPrice: number | null;
+  brand: string | null;
+  activeImageCount: number;
   productName: string | null;
   coverImageId: string | null;
+  promotionEligible: boolean;
+  promotionBlockedReason: string | null;
   images: ImportsReviewImage[];
 }
 
@@ -36,19 +49,7 @@ interface ImportsReviewClientProps {
   initialItems: ImportsReviewItem[];
 }
 
-function stateChipClassName(state: ReviewState) {
-  if (state === "approved") {
-    return "border border-emerald-300/40 bg-emerald-500/10 text-emerald-100";
-  }
-
-  if (state === "rejected") {
-    return "border border-red-300/40 bg-red-500/10 text-red-100";
-  }
-
-  return "border border-white/20 bg-white/5 text-slate-200";
-}
-
-function updateImageState(items: ImportsReviewItem[], imageId: string, nextState: ReviewState, importItemStatus: ImportsReviewItem["status"], coverImageId: string | null) {
+function updateImageState(items: ImportsReviewItem[], imageId: string, nextState: ReviewState, importItemStatus: ImportsReviewItem["status"], coverImageId: string | null, nextIsSizeGuide: boolean) {
   return items.map((item) => {
     const hasImage = item.images.some((image) => image.id === imageId);
 
@@ -56,66 +57,97 @@ function updateImageState(items: ImportsReviewItem[], imageId: string, nextState
       return item;
     }
 
+    const nextImages = item.images.map((image) => (image.id === imageId
+      ? { ...image, reviewState: nextState, isSizeGuide: nextIsSizeGuide }
+      : image));
+    const nextActiveCount = nextImages.filter((image) => image.reviewState !== "rejected").length;
+    const usefulCount = nextImages.filter((image) => image.reviewState !== "rejected" && !image.isSizeGuide).length;
+    const nextPromotionEligible = usefulCount >= 2;
+
     return {
       ...item,
       status: importItemStatus,
+      mediaStatus: item.mediaStatus,
       coverImageId,
-      images: item.images.map((image) => (image.id === imageId ? { ...image, reviewState: nextState } : image)),
+      activeImageCount: nextActiveCount,
+      promotionEligible: nextPromotionEligible,
+      promotionBlockedReason: nextPromotionEligible ? null : "insufficient useful images",
+      images: nextImages,
     };
   });
 }
 
 export function ImportsReviewClient({ initialItems }: ImportsReviewClientProps) {
   const [items, setItems] = useState(initialItems);
+  const [activeItemId, setActiveItemId] = useState<string | null>(initialItems[0]?.id ?? null);
+  const [activeImageIndexByItem, setActiveImageIndexByItem] = useState<Record<string, number>>({});
   const [undoStack, setUndoStack] = useState<RejectUndoEntry[]>([]);
   const [pendingImageId, setPendingImageId] = useState<string | null>(null);
+  const [promoting, setPromoting] = useState(false);
+  const [clearingQueue, setClearingQueue] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [activeImageIndex, setActiveImageIndex] = useState(0);
+  const [promotionMessage, setPromotionMessage] = useState<string | null>(null);
 
-  const flatImages = useMemo(
-    () => items.flatMap((item) => item.images.map((image) => ({ ...image, itemId: item.id, coverImageId: item.coverImageId }))),
-    [items],
+  const activeItem = useMemo(
+    () => items.find((item) => item.id === activeItemId) ?? items[0] ?? null,
+    [activeItemId, items],
   );
 
-  useEffect(() => {
-    if (flatImages.length === 0) {
-      setActiveImageIndex(0);
-      return;
-    }
+  const activeImageIndex = activeItem
+    ? Math.min(
+      Math.max(activeImageIndexByItem[activeItem.id] ?? 0, 0),
+      Math.max(0, activeItem.images.filter((image) => image.reviewState !== "rejected").length - 1),
+    )
+    : 0;
 
-    setActiveImageIndex((currentValue) => Math.min(currentValue, flatImages.length - 1));
-  }, [flatImages.length]);
+  const activeImages = activeItem?.images.filter((image) => image.reviewState !== "rejected") ?? [];
+  const currentImage = activeImages[activeImageIndex] ?? null;
+
+  useEffect(() => {
+    if (!activeItemId && items[0]) {
+      setActiveItemId(items[0].id);
+    }
+  }, [activeItemId, items]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       const isTyping = target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName);
 
-      if (isTyping) {
+      if (isTyping || !activeItem) {
         return;
       }
 
       if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
         event.preventDefault();
-        setActiveImageIndex((currentValue) => getNextKeyboardImageIndex({
-          currentIndex: currentValue,
-          total: flatImages.length,
-          key: event.key,
+        setActiveImageIndexByItem((currentValue) => ({
+          ...currentValue,
+          [activeItem.id]: getNextKeyboardImageIndex({
+            currentIndex: currentValue[activeItem.id] ?? 0,
+            total: activeItem.images.filter((image) => image.reviewState !== "rejected").length,
+            key: event.key,
+          }),
         }));
         return;
       }
 
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
+      const keyboardAction = getKeyboardReviewAction(event.key);
+
+      if (keyboardAction === "reject" && currentImage && pendingImageId !== currentImage.id) {
         event.preventDefault();
-        void undoLastReject();
+        void sendImageAction({
+          imageId: currentImage.id,
+          action: "reject",
+          previousState: currentImage.reviewState,
+        });
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [flatImages.length, undoStack]);
+  }, [activeItem, currentImage, pendingImageId]);
 
-  async function sendAction(input: { imageId: string; action: "approve" | "reject" | "restore"; previousState?: ReviewState }) {
+  async function sendImageAction(input: { imageId: string; action: "reject" | "restore" | "toggle-size-guide"; previousState?: ReviewState }) {
     setPendingImageId(input.imageId);
     setError(null);
 
@@ -134,6 +166,7 @@ export function ImportsReviewClient({ initialItems }: ImportsReviewClientProps) 
           previousState: ReviewState;
           importItemStatus: ImportsReviewItem["status"];
           coverImageId: string | null;
+          nextIsSizeGuide: boolean;
         };
       };
 
@@ -143,13 +176,19 @@ export function ImportsReviewClient({ initialItems }: ImportsReviewClientProps) 
 
       const { data } = payload;
 
-      setItems((currentValue) => updateImageState(
-        currentValue,
-        data.imageId,
-        data.nextState,
-        data.importItemStatus,
-        data.coverImageId,
-      ));
+      setItems((currentValue) => {
+        const updatedItems = updateImageState(
+          currentValue,
+          data.imageId,
+          data.nextState,
+          data.importItemStatus,
+          data.coverImageId,
+          data.nextIsSizeGuide,
+        );
+
+        setActiveItemId((currentActiveId) => resolveBestActiveItemAfterImageMutation(updatedItems, currentActiveId));
+        return updatedItems;
+      });
 
       if (input.action === "reject") {
         setUndoStack((currentValue) => pushRejectUndo(currentValue, {
@@ -172,86 +211,287 @@ export function ImportsReviewClient({ initialItems }: ImportsReviewClientProps) 
     }
 
     setUndoStack(remaining);
-    await sendAction({ imageId: last.imageId, action: "restore", previousState: last.previousState });
+    await sendImageAction({ imageId: last.imageId, action: "restore", previousState: last.previousState });
   }
 
-  if (items.length === 0) {
+  async function promoteItems(itemIds: string[], mode: "bulk-promote" | "promote-item") {
+    if (itemIds.length === 0) {
+      return;
+    }
+
+    setPromoting(true);
+    setError(null);
+    setPromotionMessage(null);
+
+    try {
+      const response = await fetch("/api/admin/imports", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: mode === "promote-item"
+          ? JSON.stringify({ action: mode, itemId: itemIds[0] })
+          : JSON.stringify({ action: mode, itemIds }),
+      });
+      const payload = (await response.json()) as {
+        error?: string;
+        data?: { promotedCount: number; promotedItemIds: string[]; blocked: Array<{ itemId: string; reason: string }> };
+      };
+
+      if (!response.ok || !payload.data) {
+        throw new Error(payload.error ?? "No se pudo promover en bloque.");
+      }
+
+      setItems((currentItems) => {
+        const updated = applyBulkPromotionResultToQueue({
+          items: currentItems,
+          activeItemId,
+        }, payload.data?.promotedItemIds ?? []);
+
+        setActiveItemId(updated.activeItemId);
+        return updated.items;
+      });
+
+      const blockedSummary = payload.data.blocked
+        .map((entry) => `${entry.itemId}: ${entry.reason}`)
+        .join(" · ");
+      setPromotionMessage(`Promovidos: ${payload.data.promotedCount} · Bloqueados: ${payload.data.blocked.length}${blockedSummary ? ` · ${blockedSummary}` : ""}`);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "No se pudo promover en bloque.");
+    } finally {
+      setPromoting(false);
+    }
+  }
+
+  async function promoteEligibleProducts() {
+    await promoteItems(items.map((item) => item.id), "bulk-promote");
+  }
+
+  async function promoteSingleProduct(itemId: string) {
+    await promoteItems([itemId], "promote-item");
+  }
+
+  async function clearImportsQueue() {
+    const confirmed = window.confirm("¿Querés vaciar toda la cola de importaciones? Esto solo borra staging/import queue y no toca catálogo.");
+
+    if (!confirmed) {
+      return;
+    }
+
+    setClearingQueue(true);
+    setError(null);
+    setPromotionMessage(null);
+
+    try {
+      const response = await fetch("/api/admin/imports", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "clear-queue" }),
+      });
+      const payload = (await response.json()) as {
+        error?: string;
+        data?: { deletedJobs: number };
+      };
+
+      if (!response.ok || !payload.data) {
+        throw new Error(payload.error ?? "No se pudo vaciar la cola de importaciones.");
+      }
+
+      setItems([]);
+      setActiveItemId(null);
+      setPromotionMessage(`Cola vaciada. Jobs eliminados: ${payload.data.deletedJobs}.`);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "No se pudo vaciar la cola de importaciones.");
+    } finally {
+      setClearingQueue(false);
+    }
+  }
+
+  if (items.length === 0 || !activeItem) {
     return (
       <div className="rounded-[1.75rem] border border-white/10 bg-white/[0.03] p-5 text-sm text-slate-300">
-        No hay imágenes importadas pendientes para revisar todavía.
+        No hay productos importados pendientes para revisar todavía.
       </div>
     );
   }
 
+  const quickActions = currentImage
+    ? resolvePrimaryQuickActions({
+      reviewState: currentImage.reviewState,
+      isSizeGuide: currentImage.isSizeGuide,
+    })
+    : null;
+
+  const isPending = currentImage ? pendingImageId === currentImage.id : false;
+  const isCover = currentImage ? currentImage.id === activeItem.coverImageId : false;
+  const activeProductIndex = items.findIndex((item) => item.id === activeItem.id);
+
   return (
-    <div className="space-y-4">
-      <p className="text-xs tracking-[0.25em] text-slate-400 uppercase">
-        Navegación rápida: ← / → para moverte · Ctrl+Z para deshacer último descarte
-      </p>
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-xs tracking-[0.25em] text-slate-400 uppercase">Producto a producto · Navegación con ← / →</p>
+        <div className="flex items-center gap-2">
+          <button type="button" className={compactGhostCtaClassName} onClick={undoLastReject}>
+            Deshacer descarte
+          </button>
+          <button
+            type="button"
+            className={compactGhostCtaClassName}
+            onClick={clearImportsQueue}
+            disabled={promoting || clearingQueue}
+          >
+            Vaciar cola completa
+          </button>
+          <button type="button" className={compactSolidCtaClassName} onClick={promoteEligibleProducts} disabled={promoting}>
+            Promover elegibles
+          </button>
+        </div>
+      </div>
 
-      {error ? (
-        <p className="rounded-xl border border-red-400/20 bg-red-500/10 px-3 py-2 text-sm text-red-100">{error}</p>
-      ) : null}
+      {error ? <p className="rounded-xl border border-red-400/20 bg-red-500/10 px-3 py-2 text-sm text-red-100">{error}</p> : null}
+      {promotionMessage ? <p className="rounded-xl border border-emerald-300/20 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-100">{promotionMessage}</p> : null}
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {flatImages.map((image, index) => {
-          const isActive = index === activeImageIndex;
-          const isPending = pendingImageId === image.id;
-          const isCover = image.id === image.coverImageId;
+      <div className="grid gap-5 lg:grid-cols-[280px_minmax(0,1fr)]">
+        <aside className="space-y-2 rounded-[1.4rem] border border-white/10 bg-white/[0.03] p-3">
+          {items.map((item, index) => (
+            <div key={item.id} className={`space-y-2 rounded-xl border px-3 py-2 ${item.id === activeItem.id ? "border-[#d28aa3]/70 bg-[#d28aa3]/10" : "border-white/10 bg-white/0"}`}>
+              <button
+                type="button"
+                className="w-full text-left text-sm text-slate-300 transition"
+                onClick={() => setActiveItemId(item.id)}
+              >
+                <p className="font-medium text-white">{index + 1}. {item.finalName ?? item.productName ?? "Sin nombre"}</p>
+                <p className="text-xs text-slate-400">{item.activeImageCount} imágenes activas · {item.promotionEligible ? "elegible" : "bloqueado"} · media {item.mediaStatus}</p>
+              </button>
+              <button
+                type="button"
+                className={compactGhostCtaClassName}
+                disabled={promoting}
+                onClick={() => promoteSingleProduct(item.id)}
+              >
+                Promover este producto
+              </button>
+            </div>
+          ))}
+        </aside>
 
-          return (
-            <article
-              key={image.id}
-              className={`space-y-3 rounded-[1.4rem] border bg-white/[0.03] p-3 transition ${
-                isActive ? "border-[rgba(210,138,163,0.58)] ring-1 ring-[rgba(210,138,163,0.2)]" : "border-white/10"
-              }`}
-            >
-              <div className="aspect-[4/5] overflow-hidden rounded-xl border border-white/10 bg-black/20">
+        <article className="space-y-4 rounded-[1.4rem] border border-white/10 bg-white/[0.03] p-4">
+          <header className="space-y-1">
+            <p className="text-xs tracking-[0.2em] text-slate-400 uppercase">Producto {activeProductIndex + 1} de {items.length}</p>
+            <h2 className="text-xl text-white">{activeItem.finalName ?? activeItem.productName ?? "Producto importado"}</h2>
+            <p className="text-xs text-slate-400">{activeItem.sourceReference ?? "Sin referencia de origen"}</p>
+            <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-300">
+              <dt className="text-slate-400">Nombre final</dt>
+              <dd>{activeItem.finalName ?? activeItem.productName ?? "Sin nombre"}</dd>
+              <dt className="text-slate-400">Precio final</dt>
+              <dd>{typeof activeItem.finalPrice === "number" ? `$${activeItem.finalPrice}` : "Sin precio"}</dd>
+              <dt className="text-slate-400">Marca</dt>
+              <dd>{activeItem.brand ?? "Sin marca"}</dd>
+              <dt className="text-slate-400">Imágenes activas</dt>
+              <dd>{activeItem.activeImageCount}</dd>
+            </dl>
+          </header>
+
+          {currentImage ? (
+            <>
+              <div className="relative aspect-[4/3] overflow-hidden rounded-xl border border-white/10 bg-black/30">
                 <Image
-                  src={image.previewUrl || image.originalUrl}
-                  alt="Imagen importada para revisión"
-                  width={480}
-                  height={600}
-                  className="h-full w-full object-cover"
+                  src={buildReviewImageUrl({ sourceUrl: currentImage.sourceUrl, previewUrl: currentImage.previewUrl })}
+                  alt="Imagen importada"
+                  width={1200}
+                  height={900}
+                  className="h-full w-full object-contain"
                   unoptimized
                 />
+                <span className="absolute top-3 right-3 rounded-full border border-white/25 bg-black/50 px-2 py-1 text-xs font-semibold text-white">
+                  {formatCarouselPositionLabel({ currentIndex: activeImageIndex, total: activeImages.length })}
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between gap-3">
+                <button
+                  type="button"
+                  className={compactGhostCtaClassName}
+                  onClick={() => setActiveImageIndexByItem((currentValue) => ({
+                    ...currentValue,
+                    [activeItem.id]: getNextKeyboardImageIndex({
+                      currentIndex: activeImageIndex,
+                      total: activeImages.length,
+                      key: "ArrowLeft",
+                    }),
+                  }))}
+                >
+                  ← Anterior
+                </button>
+
+                <p className="text-xs text-slate-300">Imagen {formatCarouselPositionLabel({ currentIndex: activeImageIndex, total: activeImages.length })}</p>
+
+                <button
+                  type="button"
+                  className={compactGhostCtaClassName}
+                  onClick={() => setActiveImageIndexByItem((currentValue) => ({
+                    ...currentValue,
+                    [activeItem.id]: getNextKeyboardImageIndex({
+                      currentIndex: activeImageIndex,
+                      total: activeImages.length,
+                      key: "ArrowRight",
+                    }),
+                  }))}
+                >
+                  Siguiente →
+                </button>
               </div>
 
               <div className="flex flex-wrap gap-2 text-xs uppercase">
-                <span className={`rounded-full px-2.5 py-1 ${stateChipClassName(image.reviewState)}`}>{image.reviewState}</span>
-                {image.isSizeGuide ? <span className="rounded-full border border-sky-300/35 bg-sky-500/10 px-2.5 py-1 text-sky-100">size-guide</span> : null}
+                <span className="rounded-full border border-white/20 bg-white/5 px-2.5 py-1 text-slate-200">{currentImage.reviewState}</span>
+                {currentImage.isSizeGuide ? <span className="rounded-full border border-sky-300/35 bg-sky-500/10 px-2.5 py-1 text-sky-100">size-guide</span> : null}
                 {isCover ? <span className="rounded-full border border-[#f1d2dc]/35 bg-[#f1d2dc]/10 px-2.5 py-1 text-[#f9e4ec]">cover auto</span> : null}
+              </div>
+
+              <div data-testid="active-image-strip" className="flex flex-wrap gap-2">
+                {activeImages.map((image, index) => (
+                  <button
+                    key={image.id}
+                    type="button"
+                    data-testid={`active-strip-image-${image.id}`}
+                    className={compactGhostCtaClassName}
+                    onClick={() => setActiveImageIndexByItem((currentValue) => ({
+                      ...currentValue,
+                      [activeItem.id]: index,
+                    }))}
+                  >
+                    {index + 1}
+                  </button>
+                ))}
               </div>
 
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
+                  className={compactGhostCtaClassName}
+                  disabled={isPending || !quickActions}
+                  onClick={() => sendImageAction({
+                    imageId: currentImage.id,
+                    action: quickActions?.reviewAction ?? "reject",
+                    previousState: currentImage.reviewState,
+                  })}
+                >
+                  {quickActions?.reviewAction === "reject" ? "Rechazar imagen" : "Restaurar imagen"}
+                </button>
+                <button
+                  type="button"
                   className={compactSolidCtaClassName}
-                  onClick={() => sendAction({ imageId: image.id, action: "approve" })}
-                  disabled={isPending}
+                  disabled={isPending || !quickActions}
+                  onClick={() => sendImageAction({ imageId: currentImage.id, action: "toggle-size-guide" })}
                 >
-                  Aprobar
-                </button>
-                <button
-                  type="button"
-                  className={compactGhostCtaClassName}
-                  onClick={() => sendAction({ imageId: image.id, action: "reject" })}
-                  disabled={isPending}
-                >
-                  Rechazar
-                </button>
-                <button
-                  type="button"
-                  className={compactGhostCtaClassName}
-                  onClick={() => sendAction({ imageId: image.id, action: "restore" })}
-                  disabled={isPending}
-                >
-                  Restaurar
+                  {quickActions?.sizeGuideAction === "mark-size-guide" ? "Marcar size-guide" : "Quitar size-guide"}
                 </button>
               </div>
-            </article>
-          );
-        })}
+            </>
+          ) : (
+            <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+              Este producto se quedó sin imágenes activas para revisión. La cola sigue intacta; seleccioná otro producto o restaurá imágenes descartadas.
+            </div>
+          )}
+        </article>
       </div>
     </div>
   );

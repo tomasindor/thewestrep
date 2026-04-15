@@ -1,221 +1,142 @@
 # Specification: Yupoo R2 Image Pipeline
 
-## Overview
-This specification defines the requirements and scenarios for the Yupoo R2 Image Pipeline, which unifies single and bulk Yupoo imports into a managed pipeline that downloads, processes, and stores images in Cloudflare R2, with admin curation and promotion to the live catalog.
+## Purpose
+Define a staged Yupoo import pipeline that keeps only curated product media, uses direct source URLs during review, and promotes eligible imports into the catalog with clear operator feedback. The system MUST NOT upload anything to Cloudflare R2 during staging/review, and MUST only upload to R2 after curation when the operator has removed unwanted images.
 
 ## Requirements
 
-### R1: Unified Import Pipeline
-- The system MUST provide a single ingestion service that handles both bulk and single-item Yupoo imports
-- The ingestion service MUST reuse existing Yupoo parsing and size-guide heuristics
-- The ingestion service MUST download each source image exactly once and store it in Cloudflare R2
+### Requirement: Two-stage staged ingestion with delayed R2 upload
+The system MUST route admin single-item imports and bulk Yupoo imports through one staged ingestion pipeline. Accepted unique product images MUST persist only metadata and source references during import, with NO R2 uploads during staging/review. The import flow MUST NOT generate any image variants before promotion, and images rejected by dedupe or pre-import heuristics MUST be dropped before persistence.
 
-### R2: Image Storage & Variants
-- The system MUST store original images in Cloudflare R2 with predictable key generation
-- The system MUST generate and persist six fixed variants per imported image:
-  - thumb (for small previews)
-  - cart-thumb (for cart displays)
-  - card (for product cards)
-  - detail (for product detail pages)
-  - lightbox (for full-size viewing)
-  - admin-preview (for admin interface)
-- The system MUST store variant metadata in a JSONB manifest alongside each image record
+#### Scenario: Single-item import enters staging with source references only
+- GIVEN an admin submits one Yupoo product URL
+- WHEN ingestion completes successfully
+- THEN the product is staged for review with only metadata and source image references
+- AND no images are uploaded to R2
+- AND no catalog/runtime variants are generated yet
 
-### R3: Image Metadata & Preservation
-- The system MUST persist the following metadata for each imported image:
-  - Source URL (original Yupoo URL)
-  - Variant references (R2 keys for all generated variants)
-  - Order/position (for display sequencing)
-  - Review state (pending, approved, rejected, restored, promoted)
-  - Size-guide flag (boolean indicating if image is a size guide)
-  - Similarity metadata (for future similar-image suggestions)
-- The system MUST preserve size-guide images and keep them out of accidental deletion flows
-- The system MUST maintain size-guide images in a hidden state in the storefront gallery
+#### Scenario: Pre-import rejection is dropped early
+- GIVEN ingestion detects a duplicate image or an auto-excluded non-product image
+- WHEN the import pipeline evaluates that candidate
+- THEN the candidate is discarded before any staging record is created
 
-### R4: Admin Curation Workflow
-- The system MUST provide a fast admin curation interface with:
-  - Visible state indicators for each image (pending, approved, rejected)
-  - One-click discard (reject) and restore actions
-  - Keyboard navigation for rapid review
-  - Ctrl+Z undo for the last discard action
-- The system MUST implement automatic cover selection where the first approved/active image becomes the cover
-- The system MUST reflow the cover when the current cover is rejected
+### Requirement: Hybrid heuristic image filtering
+The system MUST apply pre-import heuristics for obvious brand, showcase, and sample images. Obvious non-product candidates MUST be auto-excluded, while uncertain candidates SHOULD remain in staging for manual curation instead of being silently dropped.
 
-### R5: Catalog Delivery
-- The system MUST deliver images from owned Cloudflare-hosted assets instead of runtime Yupoo URLs
-- The system MUST maintain backward compatibility with existing catalog reads until promoted assets exist
+#### Scenario: Obvious showcase image is auto-excluded
+- GIVEN a scraped image clearly matches brand-banner or sample-only heuristics
+- WHEN ingestion classifies the candidate
+- THEN the image is excluded automatically and never reaches staging
 
-### R6: Similar Image Assistance
-- The system MUST provide similar-image suggestions as admin assistance only
-- The system MUST NOT automatically delete similar images
-- The system MUST store similarity metadata for future use
+#### Scenario: Uncertain candidate remains reviewable
+- GIVEN a scraped image matches heuristics weakly or ambiguously
+- WHEN ingestion cannot classify it as obviously non-product
+- THEN the image remains available in the review workflow for operator decision
 
-### R7: Non-Goals
-- The system MUST NOT include OCR/translation capabilities
-- The system MUST NOT include manual cover editing features
-- The system MUST NOT generalize image ingestion for non-Yupoo sources in this change
+### Requirement: Minimum useful image threshold
+After filtering, a product MUST be skipped entirely if it ends up with fewer than 2 useful images. This ensures only products with sufficient visual representation enter the review queue.
 
-## Scenarios
+#### Scenario: Product with insufficient images is skipped
+- GIVEN a product has fewer than 2 active images after heuristic filtering
+- WHEN the import pipeline completes processing
+- THEN the product is skipped entirely and does not enter staging
 
-### S1: Single Item Import
-**Given** an admin user is importing a single Yupoo product
-**When** they submit a Yupoo URL through the admin interface
-**Then** the system should:
-1. Parse the Yupoo URL and extract all image URLs
-2. Download each unique image exactly once
-3. Store the original in Cloudflare R2
-4. Generate and store all six variants in R2
-5. Create staging records for the import job and items
-6. Persist all required metadata
-7. Make the images available for admin review
+### Requirement: Review queue uses direct source URLs
+The system MUST persist source URL, display order, image activity state, and `isSizeGuide` metadata for each staged image. Imported images MUST be active by default unless explicitly rejected. `/admin/imports` MUST show each item's final name, final price, brand, and active-image count. The review flow MUST use direct source URLs from Yupoo during review, and the lower image strip in product review MUST show only active images.
 
-### S2: Bulk Import
-**Given** a user is running the bulk import script
-**When** they execute the import-yupoo script with album URLs
-**Then** the system should:
-1. Parse each Yupoo album/URL
-2. Extract all product and image data
-3. For each unique image, download it exactly once
-4. Store originals and generate variants in R2
-5. Create staging records for all imported items
-6. Make all imported items available for admin review
+#### Scenario: Queue surfaces final product metadata
+- GIVEN staged products are listed in `/admin/imports`
+- WHEN the operator reviews the queue
+- THEN each row shows final name, final price, brand, and the count of currently active images
 
-### S3: Admin Curation
-**Given** an admin user is reviewing imported images
-**When** they navigate the curation queue
-**Then** the system should:
-1. Display images with clear state indicators
-2. Allow one-click approve/reject actions
-3. Support keyboard navigation between images
-4. Provide Ctrl+Z undo for the last action
-5. Automatically set the first approved image as cover
-6. Update the cover if the current cover is rejected
+#### Scenario: Review strip hides inactive images and uses source URLs
+- GIVEN a staged product has active and inactive images
+- WHEN the operator views the lower image strip in review
+- THEN only active images appear in that strip
+- AND the review UI uses direct source URLs from Yupoo without waiting for R2 uploads
 
-### S4: Image Promotion
-**Given** an admin user has approved an import item
-**When** they confirm the promotion
-**Then** the system should:
-1. Copy the approved data to the live catalog tables
-2. Preserve size-guide metadata appropriately
-3. Update product records to use R2-hosted image URLs
-4. Maintain backward compatibility for existing products
+### Requirement: Safe image rejection in review
+Deleting or rejecting the currently visible image in review MUST NOT collapse or wipe the entire imports queue incorrectly. The system MUST handle image rejection gracefully without breaking the review flow.
 
-### S5: Size Guide Preservation
-**Given** an import contains size-guide images
-**When** the images are processed and reviewed
-**Then** the system should:
-1. Flag size-guide images appropriately
-2. Keep size-guide images out of normal deletion flows
-3. Hide size-guide images from the regular storefront gallery
-4. Preserve the original source reference for size guides
+#### Scenario: Rejecting visible image preserves queue integrity
+- GIVEN the operator is reviewing a product and the currently visible image is rejected
+- WHEN the operator deletes or rejects the currently visible image
+- THEN the review queue remains intact
+- AND the next image in the product is shown (or the product is marked as needing attention if no images remain)
 
-### S6: Similar Image Handling
-**Given** the system detects similar images during import
-**When** displaying suggestions to the admin
-**Then** the system should:
-1. Show similarity suggestions as assistance only
-2. NOT automatically delete similar images
-3. Store similarity metadata for future reference
+### Requirement: Bulk and per-product promotion with R2 upload and feedback
+The `/admin/imports` page MUST support both bulk promotion and per-product promotion. Operators MUST be able to promote individual products or entire batches as needed. Bulk promotion MUST upload active curated images to R2, generate deferred catalog variants, and promote every eligible item. Ineligible items MUST remain blocked and MUST expose understandable operator-facing reasons.
 
-## Data Model
+#### Scenario: Operator promotes a single product
+- GIVEN a staged product is ready for promotion
+- WHEN the operator selects per-product promotion
+- THEN only that product is promoted with its active curated images uploaded to R2
 
-### ImportJob
-```typescript
-interface ImportJob {
-  id: string;
-  status: 'running' | 'completed' | 'failed';
-  createdAt: Date;
-  updatedAt: Date;
-  source: 'admin' | 'bulk';
-  sourceReference?: string; // Yupoo URL or album ID
-}
-```
+#### Scenario: Operator promotes an entire batch
+- GIVEN multiple staged products are ready for promotion
+- WHEN the operator selects bulk promotion
+- THEN all eligible products in the batch are promoted with their active curated images uploaded to R2
 
-### ImportItem
-```typescript
-interface ImportItem {
-  id: string;
-  importJobId: string;
-  status: 'pending' | 'approved' | 'rejected' | 'restored' | 'promoted';
-  productData: any; // Raw scraped product data
-  createdAt: Date;
-  updatedAt: Date;
-}
-```
+#### Scenario: Ineligible items stay blocked with reasons
+- GIVEN a bulk promotion batch contains products missing an active non-size-guide gallery image or other required promotion data
+- WHEN the operator promotes the batch
+- THEN those products are not promoted
+- AND the result explains why each blocked product is ineligible
 
-### ImportImage
-```typescript
-interface ImportImage {
-  id: string;
-  importItemId: string;
-  originalUrl: string; // Source Yupoo URL
-  r2Key: string; // R2 storage key for original
-  variantsManifest: ImageVariantsManifest;
-  order: number; // Display order
-  reviewState: 'pending' | 'approved' | 'rejected' | 'restored' | 'promoted';
-  isSizeGuide: boolean;
-  similarityMetadata?: any; // For future use
-  createdAt: Date;
-  updatedAt: Date;
-}
+### Requirement: Price resolution is mandatory for import
+The system MUST reject any product that cannot resolve a valid price during scraping. Products without a resolvable price MUST be skipped entirely and MUST NOT enter the staging area.
 
-interface ImageVariantsManifest {
-  original: string; // R2 key
-  variants: {
-    thumb?: string;
-    cartThumb?: string;
-    card?: string;
-    detail?: string;
-    lightbox?: string;
-    adminPreview?: string;
-  };
-  width: number;
-  height: number;
-}
-```
+#### Scenario: Product with unresolvable price is skipped
+- GIVEN a Yupoo product cannot have its price resolved during scraping
+- WHEN the import pipeline processes the product
+- THEN the product is skipped entirely and does not enter staging
 
-## Test Cases
+### Requirement: Review carousel position indicator
+The review carousel MUST show the current image position/total clearly on hover or in an overlay. This helps operators understand their progress through the review queue.
 
-### TC1: Image Download & Storage
-- Verify that each Yupoo image is downloaded exactly once
-- Verify that originals are stored in R2 with correct keys
-- Verify that all six variants are generated and stored
+#### Scenario: Carousel shows position indicator
+- GIVEN the operator is reviewing images in the carousel
+- WHEN the operator hovers over the carousel or an overlay is present
+- THEN the current image position and total count are clearly displayed (e.g., "3/12")
 
-### TC2: Metadata Persistence
-- Verify that all required metadata is persisted for each image
-- Verify that size-guide images are properly flagged
-- Verify that variant references are correctly stored
+### Requirement: Performance-optimized review assets
+Review performance MUST use the real preview URL provided by Yupoo album data, not a guessed filename convention like `*_small.jpg`. The staging/import pipeline MUST persist whatever real preview/source URL pairing is needed so `/admin/imports` can load previews without 404s.
 
-### TC3: Admin Curation Flow
-- Verify that admin can navigate through images quickly
-- Verify that approve/reject actions work correctly
-- Verify that Ctrl+Z undo works for the last action
-- Verify that cover image is automatically set and updated
+#### Scenario: Review uses real Yupoo preview URLs
+- GIVEN the review interface is loading product images
+- WHEN images are rendered in the review carousel
+- THEN the system uses the real preview URL provided by Yupoo album data
+- AND the staging pipeline has persisted the correct preview/source URL pairing
+- AND the review proxy uses the persisted preview URL, not a guessed convention
 
-### TC4: Promotion to Catalog
-- Verify that approved items are correctly promoted to live catalog
-- Verify that product records use R2-hosted URLs
-- Verify that size-guide metadata is preserved
+#### Scenario: Preview URL persistence ensures no 404s
+- GIVEN a product is staged for review
+- WHEN the operator loads the review interface
+- THEN all preview images load successfully without 404 errors
+- AND the system has persisted the correct preview URL from Yupoo's response
 
-### TC5: Backward Compatibility
-- Verify that existing catalog reads continue to work
-- Verify that old Yupoo URLs are maintained until promotion
+### Requirement: Explicit imports queue clearing (staging only)
+The `/admin/imports` page MUST provide an explicit operator action to clear the entire imports queue. Clearing imports MUST affect staging records only and MUST NOT touch brands, categories, schema, or existing catalog products. This ensures operators can reset the import workflow without risking production data.
 
-## Acceptance Criteria
+#### Scenario: Operator clears entire imports queue (staging only)
+- GIVEN the operator is on the `/admin/imports` page
+- WHEN the operator selects the "Clear entire queue" action
+- THEN all queued staging items are removed from the staging tables
+- AND the import queue is emptied
+- AND brands, categories, schema, and catalog products remain completely unaffected
 
-1. ✅ New imports no longer depend on Yupoo delivery at runtime
-2. ✅ Single and bulk import share one ingestion pipeline
-3. ✅ Size-guide images remain preserved and hidden from normal gallery rendering
-4. ✅ Admin can approve/reject/restore candidates quickly before catalog promotion
-5. ✅ All six variants are pre-generated and stored in R2
-6. ✅ All required metadata is persisted for each image
-7. ✅ Similar image suggestions are provided as assistance only
+#### Scenario: Clearing imports isolates staging from catalog
+- GIVEN the imports queue contains multiple staged items and catalog has existing products
+- WHEN the operator clears the queue
+- THEN only import staging records are deleted
+- AND catalog products, brands, categories, and all non-staging data remain intact
+- AND the system remains in a consistent state with zero risk to production data
 
-## Implementation Phases
+### Requirement: Post-curation media failures are explicit
+The system MUST represent failures in deferred variant generation cleanly. A product or image with post-curation media work that fails MUST expose a distinct non-success state for operators or downstream processes, and MUST NOT silently appear catalog-ready until required variants complete successfully.
 
-1. **Storage Layer**: Implement R2 storage abstraction and variant generation
-2. **Schema Layer**: Create staging tables and extend image metadata
-3. **Ingestion Service**: Build shared pipeline for both bulk and single imports
-4. **Admin Curation UI**: Implement fast review interface
-5. **Promotion Logic**: Add approval boundary to catalog tables
-6. **Testing & Validation**: Verify all requirements and scenarios
+#### Scenario: Deferred variant generation fails after promotion starts
+- GIVEN an active curated image is selected for promotion
+- WHEN one or more deferred catalog variants fail to generate
+- THEN the system records a clear failure state for that promoted media work
+- AND the affected image or product is not treated as fully catalog-ready

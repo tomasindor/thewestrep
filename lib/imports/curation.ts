@@ -6,18 +6,20 @@ import { importImages, importItems, importJobs } from "@/lib/db/schema";
 import { getDb } from "@/lib/db/core";
 import {
   applyReviewAction,
+  countActiveImages,
   deriveAutomaticCoverImageId,
   deriveImportItemStatus,
+  resolvePromotionEligibility,
+  toggleSizeGuide,
   type ImportReviewAction,
   type ImportReviewState,
 } from "@/lib/imports/curation-state";
-import type { ImageVariantsManifest } from "@/lib/types/media";
 
 export interface CurationQueueImage {
   id: string;
   importItemId: string;
-  originalUrl: string;
-  previewUrl: string;
+  sourceUrl: string;
+  previewUrl: string | null;
   reviewState: ImportReviewState;
   isSizeGuide: boolean;
   order: number;
@@ -25,10 +27,17 @@ export interface CurationQueueImage {
 
 export interface CurationQueueItem {
   id: string;
-  status: "pending" | "approved" | "rejected";
+  status: "pending" | "approved" | "rejected" | "promoted" | "media_failed";
+  mediaStatus: "pending" | "ready" | "failed";
   sourceReference: string | null;
+  finalName: string | null;
+  finalPrice: number | null;
+  brand: string | null;
+  activeImageCount: number;
   productName: string | null;
   coverImageId: string | null;
+  promotionEligible: boolean;
+  promotionBlockedReason: string | null;
   images: CurationQueueImage[];
 }
 
@@ -36,17 +45,34 @@ export interface CurationQueuePayload {
   items: CurationQueueItem[];
 }
 
-export interface ApplyImportReviewActionInput {
+export async function clearImportsQueueFromDb(db: {
+  query: {
+    importJobs: {
+      findMany(input: { columns: { id: true } }): Promise<Array<{ id: string }>>;
+    };
+  };
+  delete(table: unknown): Promise<unknown>;
+}) {
+  const jobs = await db.query.importJobs.findMany({ columns: { id: true } });
+  await db.delete(importJobs);
+
+  return {
+    deletedJobs: jobs.length,
+  };
+}
+
+export interface ApplyImportImageActionInput {
   imageId: string;
   action: ImportReviewAction;
   previousState?: ImportReviewState;
 }
 
-export interface ApplyImportReviewActionResult {
+export interface ApplyImportImageActionResult {
   importItemId: string;
   imageId: string;
   previousState: ImportReviewState;
   nextState: ImportReviewState;
+  nextIsSizeGuide: boolean;
   importItemStatus: "pending" | "approved" | "rejected";
   coverImageId: string | null;
 }
@@ -54,28 +80,52 @@ export interface ApplyImportReviewActionResult {
 interface DbImportImage {
   id: string;
   importItemId: string;
-  originalUrl: string;
-  variantsManifest: ImageVariantsManifest | null;
+  sourceUrl: string;
+  previewUrl: string | null;
   reviewState: ImportReviewState;
   isSizeGuide: boolean;
   order: number;
 }
 
-function resolvePreviewUrl(image: { originalUrl: string; variantsManifest: ImageVariantsManifest | null }) {
-  const adminPreview = image.variantsManifest?.variants?.adminPreview;
-
-  if (typeof adminPreview === "string" && /^https?:\/\//i.test(adminPreview)) {
-    return adminPreview;
+function resolveMediaStatus(item: { status: string; productData: Record<string, unknown> | null }, images: readonly DbImportImage[]): "pending" | "ready" | "failed" {
+  if (item.status === "media_failed") {
+    return "failed";
   }
 
-  return image.originalUrl;
+  if (item.status === "promoted") {
+    return "ready";
+  }
+
+  return "pending";
 }
 
 function resolveProductName(productData: Record<string, unknown> | null) {
   if (!productData) return null;
 
-  const value = productData.name;
+  const value = productData.finalName ?? productData.name ?? productData.productName;
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function resolveFinalPrice(productData: Record<string, unknown> | null) {
+  if (!productData) return null;
+
+  const raw = productData.finalPrice ?? productData.priceArs;
+  return typeof raw === "number" && Number.isFinite(raw) ? raw : null;
+}
+
+function resolveBrand(productData: Record<string, unknown> | null) {
+  if (!productData) return null;
+
+  const raw = productData.brand ?? productData.brandName;
+  return typeof raw === "string" && raw.trim().length > 0 ? raw.trim() : null;
+}
+
+function isConsumedImportItem(productData: Record<string, unknown> | null) {
+  if (!productData) {
+    return false;
+  }
+
+  return typeof productData._promotionConsumedAt === "string" && productData._promotionConsumedAt.trim().length > 0;
 }
 
 export function createImportsCurationServiceFromDb(options: {
@@ -94,6 +144,14 @@ export function createImportsCurationServiceFromDb(options: {
       const normalizedItems: CurationQueueItem[] = [];
 
       for (const item of items) {
+        if (item.status === "promoted") {
+          continue;
+        }
+
+        if (isConsumedImportItem(item.productData)) {
+          continue;
+        }
+
         const images = await options.db.query.importImages.findMany({
           where: eq(importImages.importItemId, item.id),
           orderBy: [asc(importImages.order)],
@@ -104,19 +162,27 @@ export function createImportsCurationServiceFromDb(options: {
         const queueImages: CurationQueueImage[] = images.map((image) => ({
           id: image.id,
           importItemId: image.importItemId,
-          originalUrl: image.originalUrl,
-          previewUrl: resolvePreviewUrl(image),
+          sourceUrl: image.sourceUrl,
+          previewUrl: image.previewUrl ?? null,
           reviewState: image.reviewState,
           isSizeGuide: image.isSizeGuide,
           order: image.order,
         }));
+        const promotion = resolvePromotionEligibility(queueImages);
 
         normalizedItems.push({
           id: item.id,
           status: item.status,
+          mediaStatus: resolveMediaStatus(item, images),
           sourceReference: job?.sourceReference ?? null,
+          finalName: resolveProductName(item.productData),
+          finalPrice: resolveFinalPrice(item.productData),
+          brand: resolveBrand(item.productData),
+          activeImageCount: countActiveImages(queueImages),
           productName: resolveProductName(item.productData),
           coverImageId: deriveAutomaticCoverImageId(queueImages),
+          promotionEligible: promotion.eligible,
+          promotionBlockedReason: promotion.reason,
           images: queueImages,
         });
       }
@@ -126,7 +192,7 @@ export function createImportsCurationServiceFromDb(options: {
       };
     },
 
-    async applyReviewAction(input: ApplyImportReviewActionInput): Promise<ApplyImportReviewActionResult> {
+    async applyImageAction(input: ApplyImportImageActionInput): Promise<ApplyImportImageActionResult> {
       const row = await options.db.query.importImages.findFirst({ where: eq(importImages.id, input.imageId) });
 
       if (!row) {
@@ -134,11 +200,17 @@ export function createImportsCurationServiceFromDb(options: {
       }
 
       const previousState = row.reviewState;
-      const nextState = applyReviewAction(input.action, input.previousState);
+      const nextState = input.action === "toggle-size-guide"
+        ? row.reviewState
+        : applyReviewAction(input.action, input.previousState);
+      const nextIsSizeGuide = input.action === "toggle-size-guide"
+        ? toggleSizeGuide(row.isSizeGuide)
+        : row.isSizeGuide;
       const at = now();
 
       await options.db.update(importImages).set({
         reviewState: nextState,
+        isSizeGuide: nextIsSizeGuide,
         updatedAt: at,
       }).where(eq(importImages.id, row.id));
 
@@ -152,8 +224,8 @@ export function createImportsCurationServiceFromDb(options: {
           return {
             id: image.id,
             importItemId: image.importItemId,
-            originalUrl: image.originalUrl,
-            variantsManifest: image.variantsManifest,
+            sourceUrl: image.sourceUrl,
+            previewUrl: image.previewUrl ?? null,
             reviewState: image.reviewState,
             isSizeGuide: image.isSizeGuide,
             order: image.order,
@@ -163,10 +235,10 @@ export function createImportsCurationServiceFromDb(options: {
         return {
           id: image.id,
           importItemId: image.importItemId,
-          originalUrl: image.originalUrl,
-          variantsManifest: image.variantsManifest,
+          sourceUrl: image.sourceUrl,
+          previewUrl: image.previewUrl ?? null,
           reviewState: nextState,
-          isSizeGuide: image.isSizeGuide,
+          isSizeGuide: nextIsSizeGuide,
           order: image.order,
         };
       });
@@ -184,6 +256,7 @@ export function createImportsCurationServiceFromDb(options: {
         imageId: row.id,
         previousState,
         nextState,
+        nextIsSizeGuide,
         importItemStatus,
         coverImageId,
       };

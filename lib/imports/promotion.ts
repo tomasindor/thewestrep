@@ -1,15 +1,25 @@
 import "server-only";
 
-import { asc, eq } from "drizzle-orm";
+import { asc, eq, sql } from "drizzle-orm";
 
 import { DEFAULT_PRODUCT_SIZE_GUIDE_COLUMNS, normalizeProductSizeGuide } from "@/lib/catalog/size-guides";
 import {
+  brands,
+  categories,
   importImages,
   importItems,
   productImages,
   products,
   productSizeGuides,
 } from "@/lib/db/schema";
+import { isImageActive, type ImportReviewState } from "@/lib/imports/curation-state";
+import {
+  generateCatalogVariants,
+  mapVariantNameToManifestField,
+  type CatalogImageVariantName,
+  type GenerateCatalogVariantsResult,
+} from "@/lib/media/variants";
+import { createR2StorageFromEnv } from "@/lib/media/r2-storage-adapter";
 import type { ImageVariantsManifest } from "@/lib/types/media";
 import { createId, slugify } from "@/lib/utils";
 
@@ -19,17 +29,16 @@ export interface StagedImportItem {
   id: string;
   status: string;
   productData: Record<string, unknown> | null;
+  price: number | null;
 }
 
 export interface StagedImportImage {
   id: string;
   importItemId: string;
-  originalUrl: string;
-  sourceYupooUrl: string | null;
-  r2Key: string;
-  variantsManifest: ImageVariantsManifest | null;
+  sourceUrl: string;
+  variantsManifest?: ImageVariantsManifest | null;
   order: number;
-  reviewState: string;
+  reviewState: ImportReviewState;
   isSizeGuide: boolean;
 }
 
@@ -51,6 +60,12 @@ interface PromotionProductInput {
     rows: Array<{ label: string; values: string[] }>;
   };
 }
+
+type PromotionMetadataContext = {
+  importItemId: string;
+  productData: Record<string, unknown>;
+  importItemPrice: number | null;
+};
 
 interface ExistingProduct {
   id: string;
@@ -94,11 +109,20 @@ export interface PromotionFoundation {
   buildOwnedAssetUrl: (assetKey: string) => string;
   loadImportItemById: (importItemId: string) => Promise<StagedImportItem | null>;
   loadImportImagesByItemId: (importItemId: string) => Promise<StagedImportImage[]>;
+  listEligibleImportItems?: (input?: { itemIds?: string[] }) => Promise<StagedImportItem[]>;
+  findBrandIdByName?: (name: string) => Promise<string | null>;
+  findCategoryIdByName?: (name: string) => Promise<string | null>;
   findProductBySlug: (slug: string) => Promise<ExistingProduct | null>;
   createProduct: (values: Record<string, unknown>) => Promise<ProductIdentity>;
   updateProduct: (productId: string, values: Record<string, unknown>) => Promise<void>;
   insertProductImage: (values: ProductImageInsertInput) => Promise<void>;
   upsertProductSizeGuide: (values: ProductSizeGuideInput) => Promise<void>;
+  markImportItemPromoted: (input: { importItemId: string; promotedAt: Date }) => Promise<void>;
+  markImportItemMediaFailed: (input: { importItemId: string; failedAt: Date; reason: string }) => Promise<void>;
+  downloadSourceImage: (url: string) => Promise<{ body: Buffer; contentType?: string }>;
+  storeOriginalInR2: (write: { key: string; body: Buffer; contentType: string; sourceUrl: string }) => Promise<void>;
+  generateCatalogVariants: (input: { source: Buffer; originalKey: string }) => Promise<GenerateCatalogVariantsResult>;
+  storeVariantInR2: (write: { key: string; body: Buffer; contentType: string; sourceUrl: string }) => Promise<void>;
 }
 
 export interface PromoteImportItemInput {
@@ -114,40 +138,157 @@ export interface PromoteImportItemResult {
   sizeGuidePreserved: boolean;
 }
 
-function toNumber(value: unknown, fallback: number) {
-  if (typeof value === "number" && Number.isFinite(value)) {
+export interface BulkPromotionResult {
+  promotedCount: number;
+  promotedItemIds: string[];
+  blocked: Array<{ itemId: string; reason: string; mediaStatus?: "failed" }>;
+}
+
+const IMMUTABLE_CACHE_CONTROL = "public, max-age=31536000, immutable";
+const REQUIRED_CATALOG_VARIANTS: readonly CatalogImageVariantName[] = ["thumb", "cart-thumb", "card", "detail", "lightbox"];
+
+function resolveImageExtension(sourceUrl: string, contentType?: string) {
+  if (contentType?.includes("png")) return ".png";
+  if (contentType?.includes("webp")) return ".webp";
+  if (contentType?.includes("jpeg") || contentType?.includes("jpg")) return ".jpg";
+
+  const extension = sourceUrl.match(/\.(jpe?g|png|webp)(?:$|[?#])/i)?.[1]?.toLowerCase();
+  if (extension === "jpeg") return ".jpg";
+  if (extension === "jpg" || extension === "png" || extension === "webp") return `.${extension}`;
+
+  return ".jpg";
+}
+
+function buildPromotionOriginalKey(importItemId: string, order: number, sourceUrl: string, contentType?: string) {
+  const extension = resolveImageExtension(sourceUrl, contentType);
+  return `imports/promoted/${importItemId}/${String(order).padStart(3, "0")}/original${extension}`;
+}
+
+function toPositiveNumber(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) {
     return value;
   }
 
-  return fallback;
+  if (typeof value === "string") {
+    const normalized = value.replace(/\./g, "").replace(",", ".").trim();
+    const parsed = Number(normalized);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return parsed;
+    }
+  }
+
+  return null;
 }
 
-function requireStringField(productData: Record<string, unknown>, key: string) {
-  const value = productData[key];
-  if (typeof value !== "string" || value.trim().length === 0) {
+function asTrimmedString(value: unknown) {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
+function readStringFallback(productData: Record<string, unknown>, keys: readonly string[]) {
+  for (const key of keys) {
+    const value = asTrimmedString(productData[key]);
+    if (value) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+function readPromotionConsumedAt(productData: Record<string, unknown> | null) {
+  if (!productData) {
+    return null;
+  }
+
+  const consumedAt = productData._promotionConsumedAt;
+  return typeof consumedAt === "string" && consumedAt.trim().length > 0 ? consumedAt : null;
+}
+
+function isImportItemConsumed(productData: Record<string, unknown> | null) {
+  return Boolean(readPromotionConsumedAt(productData));
+}
+
+function requireResolvedStringField(value: string | null, key: string) {
+  if (!value) {
     throw new Error(`El campo ${key} es obligatorio para promover el item importado.`);
   }
 
-  return value.trim();
+  return value;
 }
 
-function parsePromotionProductInput(productData: Record<string, unknown> | null): PromotionProductInput {
-  if (!productData) {
+async function resolveBrandId(context: PromotionMetadataContext, foundation: PromotionFoundation) {
+  const direct = asTrimmedString(context.productData.brandId);
+  if (direct) {
+    return direct;
+  }
+
+  const brandName = readStringFallback(context.productData, ["brandName", "brand"]);
+  if (!brandName || !foundation.findBrandIdByName) {
+    return null;
+  }
+
+  return foundation.findBrandIdByName(brandName);
+}
+
+async function resolveCategoryId(context: PromotionMetadataContext, foundation: PromotionFoundation) {
+  const direct = asTrimmedString(context.productData.categoryId);
+  if (direct) {
+    return direct;
+  }
+
+  const categoryName = readStringFallback(context.productData, ["categoryName", "category"]);
+  if (!categoryName || !foundation.findCategoryIdByName) {
+    return null;
+  }
+
+  return foundation.findCategoryIdByName(categoryName);
+}
+
+async function parsePromotionProductInput(
+  importItem: StagedImportItem,
+  foundation: PromotionFoundation,
+): Promise<PromotionProductInput> {
+  if (!importItem.productData) {
     throw new Error("El item importado no tiene productData para promoción.");
   }
 
-  const name = requireStringField(productData, "name");
-  const slugValue = typeof productData.slug === "string" && productData.slug.trim().length > 0
-    ? productData.slug
-    : slugify(name);
-  const brandId = requireStringField(productData, "brandId");
-  const categoryId = requireStringField(productData, "categoryId");
-  const type = productData.type === "stock" ? "stock" : "encargue";
-  const sourceUrl = typeof productData.sourceUrl === "string" && productData.sourceUrl.trim().length > 0
-    ? productData.sourceUrl
+  const context: PromotionMetadataContext = {
+    importItemId: importItem.id,
+    productData: importItem.productData,
+    importItemPrice: importItem.price,
+  };
+
+  const name = requireResolvedStringField(
+    readStringFallback(context.productData, ["finalName", "name", "productName", "rawName"]),
+    "name",
+  );
+
+  const slugCandidate = readStringFallback(context.productData, ["slug"]);
+  const slugValue = slugCandidate ?? slugify(name);
+
+  const brandId = requireResolvedStringField(await resolveBrandId(context, foundation), "brandId");
+  const categoryId = requireResolvedStringField(await resolveCategoryId(context, foundation), "categoryId");
+
+  const resolvedPrice = toPositiveNumber(context.productData.finalPrice)
+    ?? toPositiveNumber(context.productData.priceArs)
+    ?? toPositiveNumber(context.productData.price)
+    ?? toPositiveNumber(context.importItemPrice);
+  const priceArs = requireResolvedStringField(
+    resolvedPrice !== null ? String(Math.round(resolvedPrice)) : null,
+    "priceArs",
+  );
+
+  const type = context.productData.type === "stock" ? "stock" : "encargue";
+  const sourceUrl = typeof context.productData.sourceUrl === "string" && context.productData.sourceUrl.trim().length > 0
+    ? context.productData.sourceUrl
     : undefined;
-  const description = typeof productData.description === "string" ? productData.description : "";
-  const sizeGuideCandidate = productData.sizeGuide;
+  const description = typeof context.productData.description === "string" ? context.productData.description : "";
+  const sizeGuideCandidate = context.productData.sizeGuide;
   const sizeGuideRecord = sizeGuideCandidate && typeof sizeGuideCandidate === "object"
     ? sizeGuideCandidate as Record<string, unknown>
     : null;
@@ -179,7 +320,7 @@ function parsePromotionProductInput(productData: Record<string, unknown> | null)
     brandId,
     categoryId,
     type,
-    priceArs: toNumber(productData.priceArs, 0),
+    priceArs: Number(priceArs),
     description,
     sourceUrl,
     sizeGuide: normalizedGuide
@@ -206,16 +347,16 @@ export function updateProductImageUrls(input: {
   return input.approvedImages.map((image, index) => {
     const preferredAssetKey = image.variantsManifest?.variants?.detail
       ?? image.variantsManifest?.original
-      ?? image.r2Key;
+      ?? "";
 
     return {
       id: input.idFactory("product-image"),
       productId: input.productId,
       url: input.buildOwnedAssetUrl(preferredAssetKey),
-      sourceUrl: image.originalUrl,
+      sourceUrl: image.sourceUrl,
       provider: "r2" as const,
       assetKey: preferredAssetKey,
-      variantsManifest: image.variantsManifest,
+      variantsManifest: image.variantsManifest ?? null,
       alt: `${input.productName} ${index + 1}`,
       position: index,
       source: "yupoo" as const,
@@ -231,6 +372,76 @@ export async function createProductImages(
   for (const row of rows) {
     await foundation.insertProductImage(row);
   }
+}
+
+function normalizeVariantManifestForStaging(manifest: ImageVariantsManifest | null, fallbackOriginal: string): ImageVariantsManifest {
+  return {
+    original: manifest?.original ?? fallbackOriginal,
+    stage: manifest?.stage ?? "staged-preview",
+    catalogStatus: manifest?.catalogStatus ?? "pending",
+    missingCatalogVariants: manifest?.missingCatalogVariants ?? ["thumb", "cartThumb", "card", "detail", "lightbox"],
+    lastCatalogError: manifest?.lastCatalogError,
+    variants: {
+      thumb: manifest?.variants?.thumb,
+      cartThumb: manifest?.variants?.cartThumb,
+      card: manifest?.variants?.card,
+      detail: manifest?.variants?.detail,
+      lightbox: manifest?.variants?.lightbox,
+      adminPreview: manifest?.variants?.adminPreview,
+    },
+    width: manifest?.width ?? 0,
+    height: manifest?.height ?? 0,
+  };
+}
+
+async function ensureCatalogVariantsForImage(
+  image: StagedImportImage,
+  foundation: PromotionFoundation,
+): Promise<ImageVariantsManifest> {
+  const sourceObject = await foundation.downloadSourceImage(image.sourceUrl);
+  const originalKey = buildPromotionOriginalKey(image.importItemId, image.order, image.sourceUrl, sourceObject.contentType);
+
+  await foundation.storeOriginalInR2({
+    key: originalKey,
+    body: sourceObject.body,
+    contentType: sourceObject.contentType ?? "image/jpeg",
+    sourceUrl: image.sourceUrl,
+  });
+
+  const current = normalizeVariantManifestForStaging(image.variantsManifest ?? null, originalKey);
+  const missing = REQUIRED_CATALOG_VARIANTS.filter((variantName) => {
+    const field = mapVariantNameToManifestField(variantName);
+    return !current.variants[field];
+  });
+
+  const generated = await foundation.generateCatalogVariants({
+    source: sourceObject.body,
+    originalKey,
+  });
+
+  for (const variantName of missing) {
+    const variant = generated.variants[variantName];
+    await foundation.storeVariantInR2({
+      key: variant.key,
+      body: variant.buffer,
+      contentType: variant.contentType,
+      sourceUrl: image.sourceUrl,
+    });
+
+    const field = mapVariantNameToManifestField(variantName);
+    current.variants[field] = variant.key;
+  }
+
+  return {
+    ...current,
+    original: originalKey,
+    width: generated.original.width,
+    height: generated.original.height,
+    stage: "catalog-ready",
+    catalogStatus: "ready",
+    missingCatalogVariants: [],
+    lastCatalogError: undefined,
+  };
 }
 
 export async function copyToProducts(
@@ -294,7 +505,7 @@ export async function preserveSizeGuides(input: {
   now: Date;
 }) {
   const sourceImageUrl = input.productSizeGuide?.sourceImageUrl
-    ?? input.approvedImages.find((image) => image.isSizeGuide)?.originalUrl;
+    ?? input.approvedImages.find((image) => image.isSizeGuide)?.sourceUrl;
 
   if (!input.productSizeGuide && !sourceImageUrl) {
     return false;
@@ -324,25 +535,56 @@ export async function promoteImportItem(
     throw new Error("No se encontró el import_item solicitado.");
   }
 
+  if (importItem.status === "rejected") {
+    throw new Error("Solo se pueden promover items en estado approved.");
+  }
+
   if (importItem.status !== "approved") {
     throw new Error("Solo se pueden promover items en estado approved.");
   }
 
-  const approvedImages = (await foundation.loadImportImagesByItemId(importItem.id))
-    .filter((image) => image.reviewState === "approved")
+  if (isImportItemConsumed(importItem.productData)) {
+    throw new Error("El item importado ya fue promovido y consumido.");
+  }
+
+  const productInput = await parsePromotionProductInput(importItem, foundation);
+
+  const activeImages = (await foundation.loadImportImagesByItemId(importItem.id))
+    .filter((image) => isImageActive(image.reviewState))
     .sort((left, right) => left.order - right.order);
 
-  if (approvedImages.length === 0) {
-    throw new Error("No hay imágenes aprobadas para promover.");
+  const galleryImages = activeImages.filter((image) => !image.isSizeGuide);
+
+  if (galleryImages.length < 2) {
+    throw new Error("insufficient useful images");
   }
 
   const now = foundation.now();
-  const productInput = parsePromotionProductInput(importItem.productData);
+  const galleryImagesWithCatalogManifest: StagedImportImage[] = [];
+
+  try {
+    for (const image of galleryImages) {
+      const variantsManifest = await ensureCatalogVariantsForImage(image, foundation);
+      galleryImagesWithCatalogManifest.push({
+        ...image,
+        variantsManifest,
+      });
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await foundation.markImportItemMediaFailed({
+      importItemId: importItem.id,
+      failedAt: now,
+      reason: message,
+    });
+    throw new Error(`Falló la generación de variantes diferidas: ${message}`);
+  }
+
   const { product, created } = await copyToProducts(foundation, productInput, now);
   const imageRows = updateProductImageUrls({
     productId: product.id,
     productName: productInput.name,
-    approvedImages,
+    approvedImages: galleryImagesWithCatalogManifest,
     idFactory: foundation.idFactory,
     now,
     buildOwnedAssetUrl: foundation.buildOwnedAssetUrl,
@@ -354,8 +596,13 @@ export async function promoteImportItem(
     foundation,
     productId: product.id,
     productSizeGuide: productInput.sizeGuide,
-    approvedImages,
+    approvedImages: activeImages,
     now,
+  });
+
+  await foundation.markImportItemPromoted({
+    importItemId: input.importItemId,
+    promotedAt: now,
   });
 
   return {
@@ -368,6 +615,51 @@ export async function promoteImportItem(
   };
 }
 
+export async function promoteEligibleImportItems(
+  input: { itemIds?: string[] },
+  foundation: PromotionFoundation,
+): Promise<BulkPromotionResult> {
+  if (!foundation.listEligibleImportItems) {
+    throw new Error("listEligibleImportItems no configurado.");
+  }
+
+  const candidates = await foundation.listEligibleImportItems({ itemIds: input.itemIds });
+  const candidateIds = new Set(candidates.map((item) => item.id));
+  const result: BulkPromotionResult = {
+    promotedCount: 0,
+    promotedItemIds: [],
+    blocked: [],
+  };
+
+  if (input.itemIds?.length) {
+    for (const itemId of input.itemIds) {
+      if (!candidateIds.has(itemId)) {
+        result.blocked.push({
+          itemId,
+          reason: "El item no es elegible para promoción (estado inválido o ya consumido).",
+        });
+      }
+    }
+  }
+
+  for (const item of candidates) {
+    try {
+      await promoteImportItem({ importItemId: item.id }, foundation);
+      result.promotedCount += 1;
+      result.promotedItemIds.push(item.id);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      result.blocked.push({
+        itemId: item.id,
+        reason,
+        mediaStatus: /variantes diferidas/i.test(reason) ? "failed" : undefined,
+      });
+    }
+  }
+
+  return result;
+}
+
 export function createPromotionFoundation(overrides: Partial<PromotionFoundation>): PromotionFoundation {
   return {
     now: () => new Date(),
@@ -378,6 +670,15 @@ export function createPromotionFoundation(overrides: Partial<PromotionFoundation
     },
     async loadImportImagesByItemId() {
       throw new Error("loadImportImagesByItemId no configurado.");
+    },
+    async listEligibleImportItems() {
+      throw new Error("listEligibleImportItems no configurado.");
+    },
+    async findBrandIdByName() {
+      return null;
+    },
+    async findCategoryIdByName() {
+      return null;
     },
     async findProductBySlug() {
       throw new Error("findProductBySlug no configurado.");
@@ -394,27 +695,42 @@ export function createPromotionFoundation(overrides: Partial<PromotionFoundation
     async upsertProductSizeGuide() {
       throw new Error("upsertProductSizeGuide no configurado.");
     },
+    async markImportItemPromoted() {
+      throw new Error("markImportItemPromoted no configurado.");
+    },
+    async markImportItemMediaFailed() {
+      throw new Error("markImportItemMediaFailed no configurado.");
+    },
+    async downloadSourceImage() {
+      throw new Error("downloadSourceImage no configurado.");
+    },
+    async storeOriginalInR2() {
+      throw new Error("storeOriginalInR2 no configurado.");
+    },
+    async generateCatalogVariants() {
+      throw new Error("generateCatalogVariants no configurado.");
+    },
+    async storeVariantInR2() {
+      throw new Error("storeVariantInR2 no configurado.");
+    },
     ...overrides,
   };
 }
 
 export function createPromotionFoundationFromDb(options: {
   db: {
-    query: {
-      importItems: { findFirst(input: { where: unknown }): Promise<typeof importItems.$inferSelect | undefined> };
-      importImages: { findMany(input: { where: unknown; orderBy?: unknown[] }): Promise<Array<typeof importImages.$inferSelect>> };
-      products: { findFirst(input: { where: unknown }): Promise<typeof products.$inferSelect | undefined> };
-      productSizeGuides: { findFirst(input: { where: unknown }): Promise<typeof productSizeGuides.$inferSelect | undefined> };
-    };
+    query: Record<string, any>;
     insert(table: unknown): { values(values: unknown): Promise<unknown> };
     update(table: unknown): { set(values: unknown): { where(predicate: unknown): Promise<unknown> } };
   };
   now?: () => Date;
   idFactory?: (prefix: string) => string;
   buildOwnedAssetUrl?: (assetKey: string) => string;
+  createStorage?: () => Pick<ReturnType<typeof createR2StorageFromEnv>, "putObject">;
 }): PromotionFoundation {
   const now = options.now ?? (() => new Date());
   const idFactory = options.idFactory ?? createId;
+  const createStorage = options.createStorage ?? createR2StorageFromEnv;
 
   return createPromotionFoundation({
     now,
@@ -427,25 +743,71 @@ export function createPromotionFoundationFromDb(options: {
         id: row.id,
         status: row.status,
         productData: row.productData,
+        price: row.price,
       };
     },
     loadImportImagesByItemId: async (importItemId) => {
       const rows = await options.db.query.importImages.findMany({
         where: eq(importImages.importItemId, importItemId),
         orderBy: [asc(importImages.order)],
-      });
+      }) as Array<{
+        id: string;
+        importItemId: string;
+        sourceUrl: string;
+        order: number;
+        reviewState: ImportReviewState;
+        isSizeGuide: boolean;
+      }>;
 
       return rows.map((row) => ({
         id: row.id,
         importItemId: row.importItemId,
-        originalUrl: row.originalUrl,
-        sourceYupooUrl: row.sourceYupooUrl,
-        r2Key: row.r2Key,
-        variantsManifest: row.variantsManifest,
+        sourceUrl: row.sourceUrl,
+        variantsManifest: null,
         order: row.order,
         reviewState: row.reviewState,
         isSizeGuide: row.isSizeGuide,
       }));
+    },
+    listEligibleImportItems: async ({ itemIds } = {}) => {
+      const rows = await options.db.query.importItems.findMany({
+        orderBy: [asc(importItems.createdAt)],
+      }) as Array<{ id: string; status: string; productData: Record<string, unknown> | null; price: number | null }>;
+
+      const allowedIds = itemIds ? new Set(itemIds) : null;
+
+      return rows
+        .filter((row: { id: string; status: string; productData: Record<string, unknown> | null; price: number | null }) => row.status === "approved" || row.status === "media_failed")
+        .filter((row: { id: string; status: string; productData: Record<string, unknown> | null; price: number | null }) => !isImportItemConsumed(row.productData))
+        .filter((row: { id: string }) => (allowedIds ? allowedIds.has(row.id) : true))
+        .map((row: { id: string; status: string; productData: Record<string, unknown> | null; price: number | null }) => ({
+          id: row.id,
+          status: row.status,
+          productData: row.productData,
+          price: row.price,
+        }));
+    },
+    findBrandIdByName: async (name) => {
+      const normalizedName = name.trim();
+      if (!normalizedName) {
+        return null;
+      }
+
+      const row = await options.db.query.brands.findFirst({
+        where: sql`lower(${brands.name}) = lower(${normalizedName})`,
+      });
+      return row?.id ?? null;
+    },
+    findCategoryIdByName: async (name) => {
+      const normalizedName = name.trim();
+      if (!normalizedName) {
+        return null;
+      }
+
+      const row = await options.db.query.categories.findFirst({
+        where: sql`lower(${categories.name}) = lower(${normalizedName})`,
+      });
+      return row?.id ?? null;
     },
     findProductBySlug: async (slug) => {
       const row = await options.db.query.products.findFirst({ where: eq(products.slug, slug) });
@@ -498,6 +860,80 @@ export function createPromotionFoundationFromDb(options: {
         rows: values.rows,
         createdAt: values.now,
         updatedAt: values.now,
+      });
+    },
+    markImportItemPromoted: async ({ importItemId, promotedAt }) => {
+      const consumedAtIso = promotedAt.toISOString();
+      await options.db.update(importItems).set({
+        status: "promoted",
+        productData: sql`jsonb_set(COALESCE(${importItems.productData}, '{}'::jsonb), '{_promotionConsumedAt}', to_jsonb(${consumedAtIso}::text), true)`,
+        updatedAt: promotedAt,
+      }).where(eq(importItems.id, importItemId));
+    },
+    markImportItemMediaFailed: async ({ importItemId, failedAt, reason }) => {
+      await options.db.update(importItems).set({
+        status: "media_failed",
+        productData: sql`
+          jsonb_set(
+            jsonb_set(
+              COALESCE(${importItems.productData}, '{}'::jsonb),
+              '{_deferredMediaStatus}',
+              to_jsonb('failed'::text),
+              true
+            ),
+            '{_deferredMediaError}',
+            to_jsonb(${reason}::text),
+            true
+          )
+        `,
+        updatedAt: failedAt,
+      }).where(eq(importItems.id, importItemId));
+    },
+    downloadSourceImage: async (sourceUrl) => {
+      const response = await fetch(sourceUrl, {
+        headers: {
+          "user-agent": "Mozilla/5.0 (compatible; thewestrep-bot/1.0)",
+          referer: "https://x.yupoo.com/",
+        },
+        cache: "no-store",
+      });
+
+      if (!response.ok) {
+        throw new Error(`No se pudo descargar la imagen de origen (${response.status}) ${sourceUrl}`);
+      }
+
+      return {
+        body: Buffer.from(await response.arrayBuffer()),
+        contentType: response.headers.get("content-type") ?? undefined,
+      };
+    },
+    storeOriginalInR2: async (write) => {
+      const storage = createStorage();
+      await storage.putObject({
+        key: write.key,
+        body: write.body,
+        contentType: write.contentType,
+        cacheControl: IMMUTABLE_CACHE_CONTROL,
+        metadata: {
+          source: "yupoo",
+          sourceUrl: write.sourceUrl,
+          role: "original",
+        },
+      });
+    },
+    generateCatalogVariants,
+    storeVariantInR2: async (write) => {
+      const storage = createStorage();
+      await storage.putObject({
+        key: write.key,
+        body: write.body,
+        contentType: write.contentType,
+        cacheControl: IMMUTABLE_CACHE_CONTROL,
+        metadata: {
+          source: "yupoo",
+          sourceUrl: write.sourceUrl,
+          role: "variant",
+        },
       });
     },
   });
