@@ -2,8 +2,11 @@ import { getDb } from "@/lib/db/core";
 import {
   clearImportsQueueFromDb,
   createImportsCurationServiceFromDb,
+  deleteImportItemFromDb,
+  updateImportItemFromDb,
   type ApplyImportImageActionResult,
   type CurationQueuePayload,
+  type UpdateImportItemData,
 } from "@/lib/imports/curation";
 import { createPromotionFoundationFromDb, type BulkPromotionResult, promoteEligibleImportItems } from "@/lib/imports/promotion";
 import type { ImportReviewAction, ImportReviewState } from "@/lib/imports/curation-state";
@@ -18,8 +21,9 @@ interface AdminImportsActionBody {
   imageId?: string;
   itemId?: string;
   itemIds?: string[];
-  action?: ImportReviewAction | "bulk-promote" | "promote-item" | "clear-queue" | "approve";
+  action?: ImportReviewAction | "bulk-promote" | "promote-item" | "clear-queue" | "approve" | "delete-item" | "update-item";
   previousState?: ImportReviewState;
+  updateData?: UpdateImportItemData;
 }
 
 interface AdminImportsRouteDeps {
@@ -28,6 +32,8 @@ interface AdminImportsRouteDeps {
   applyImageAction: (input: { imageId: string; action: ImportReviewAction; previousState?: ImportReviewState }) => Promise<ApplyImportImageActionResult>;
   promoteEligibleItems: (input: { itemIds?: string[] }) => Promise<BulkPromotionResult>;
   clearImportsQueue: () => Promise<{ deletedJobs: number }>;
+  deleteImportItem: (importItemId: string) => Promise<{ deleted: boolean; importItemId?: string; importJobId?: string; reason?: string }>;
+  updateImportItem: (importItemId: string, data: UpdateImportItemData) => Promise<{ updated: boolean; importItemId?: string; reason?: string }>;
   logError: (event: string, context: Record<string, unknown>) => void;
 }
 
@@ -47,6 +53,8 @@ function createDefaultDeps(): AdminImportsRouteDeps | null {
     applyImageAction: service.applyImageAction,
     promoteEligibleItems: (input) => promoteEligibleImportItems(input, promotionFoundation),
     clearImportsQueue: async () => clearImportsQueueFromDb(db),
+    deleteImportItem: async (importItemId: string) => deleteImportItemFromDb(db, importItemId),
+    updateImportItem: async (importItemId: string, data: UpdateImportItemData) => updateImportItemFromDb(db, importItemId, data),
     logError: logger.error,
   };
 }
@@ -97,16 +105,30 @@ export function createAdminImportsRouteHandlers(overrides: Partial<AdminImportsR
 
       return defaults.promoteEligibleItems(input);
     },
-    clearImportsQueue: async () => {
-      if (!defaults) {
-        throw new Error("Database not configured. Set DATABASE_URL in your environment.");
-      }
+  clearImportsQueue: async () => {
+    if (!defaults) {
+      throw new Error("Database not configured. Set DATABASE_URL in your environment.");
+    }
 
-      return defaults.clearImportsQueue();
-    },
-    logError: logger.error,
-    ...overrides,
-  };
+    return defaults.clearImportsQueue();
+  },
+  deleteImportItem: async (importItemId: string) => {
+    if (!defaults) {
+      throw new Error("Database not configured. Set DATABASE_URL in your environment.");
+    }
+
+    return defaults.deleteImportItem(importItemId);
+  },
+  updateImportItem: async (importItemId: string, data: UpdateImportItemData) => {
+    if (!defaults) {
+      throw new Error("Database not configured. Set DATABASE_URL in your environment.");
+    }
+
+    return defaults.updateImportItem(importItemId, data);
+  },
+  logError: logger.error,
+  ...overrides,
+};
 
   return {
     async GET(request: Request) {
@@ -158,14 +180,51 @@ export function createAdminImportsRouteHandlers(overrides: Partial<AdminImportsR
           return Response.json({ ok: true, data: result });
         }
 
-        if (body.action === "clear-queue") {
-          const result = await deps.clearImportsQueue();
-          return Response.json({ ok: true, data: result });
-        }
+if (body.action === "clear-queue") {
+  const result = await deps.clearImportsQueue();
+  return Response.json({ ok: true, data: result });
+}
 
-        if (!imageId || !action) {
-          return Response.json({ error: "Debés enviar imageId y una acción válida (reject/restore/toggle-size-guide o bulk-promote)." }, { status: 400 });
-        }
+if (body.action === "delete-item") {
+  const itemId = typeof body.itemId === "string" && body.itemId.trim().length > 0
+    ? body.itemId.trim()
+    : null;
+
+  if (!itemId) {
+    return Response.json({ error: "Debés enviar itemId para eliminar el producto." }, { status: 400 });
+  }
+
+  const result = await deps.deleteImportItem(itemId);
+  return Response.json({ ok: true, data: result });
+}
+
+if (body.action === "update-item") {
+  const itemId = typeof body.itemId === "string" && body.itemId.trim().length > 0
+    ? body.itemId.trim()
+    : null;
+
+  if (!itemId) {
+    return Response.json({ error: "Debés enviar itemId para actualizar el producto." }, { status: 400 });
+  }
+
+  const updateData: UpdateImportItemData = {};
+  if (typeof body.updateData?.finalName === "string") {
+    updateData.finalName = body.updateData.finalName;
+  }
+  if (typeof body.updateData?.finalPrice === "number") {
+    updateData.finalPrice = body.updateData.finalPrice;
+  }
+  if (typeof body.updateData?.categoryName === "string") {
+    updateData.categoryName = body.updateData.categoryName;
+  }
+
+  const result = await deps.updateImportItem(itemId, updateData);
+  return Response.json({ ok: true, data: result });
+}
+
+if (!imageId || !action) {
+  return Response.json({ error: "Debés enviar imageId y una acción válida (reject/restore/toggle-size-guide o bulk-promote)." }, { status: 400 });
+}
 
         const result = await deps.applyImageAction({ imageId, action, previousState });
         return Response.json({ ok: true, data: result });

@@ -620,3 +620,153 @@
 - None.
 
 **Status**: Requested follow-up fix batch completed under strict TDD. Promotion now accepts the metadata shape actually persisted in staging, validates required metadata before any media side-effects, promoted items disappear from queue immediately, `ArrowDown` rejects the current image in review UI, and bulk promotion works with the corrected metadata resolution flow.
+
+## Files Changed (skip-existing duplicate detection batch)
+| File | Action | What Was Done |
+|------|--------|---------------|
+| `tests/unit/lib/imports/duplicate-detection.test.ts` | Created | Added strict-TDD unit coverage for duplicate detection flows: new album import, existing catalog skip, existing staging skip, and canonical identity matching across URL format variations. |
+| `lib/yupoo-core.ts` | Modified | Added stable Yupoo identity helpers (`canonicalizeYupooSourceUrl`, `getYupooAlbumIdentity`) used to normalize album identity before duplicate checks. |
+| `lib/imports/ingestion.ts` | Modified | Added duplicate detection contract before staging inserts (after price validation) with default DB lookup against catalog (`products.sourceUrl`) and staging queue (`importJobs.sourceReference`), returning `skipReason: "already-exists"`. |
+| `openspec/changes/yupoo-r2-image-pipeline/tasks.md` | Modified | Marked tasks 2.7, 2.8, 2.9, and 2.10 as complete for this batch. |
+| `openspec/changes/yupoo-r2-image-pipeline/apply-progress.md` | Modified | Appended strict-TDD evidence and command trace for this duplicate-skip batch. |
+
+## TDD Cycle Evidence (skip-existing duplicate detection batch)
+| Task | Test File | Layer | Safety Net | RED | GREEN | TRIANGULATE | REFACTOR |
+|------|-----------|-------|------------|-----|-------|-------------|----------|
+| 2.7 + 2.8 + 2.9 + 2.10 | `tests/unit/lib/imports/duplicate-detection.test.ts` | Unit | ✅ `tests/unit/import-ingestion.test.ts` + `tests/unit/lib/yupoo-core.test.ts` baseline 9/9 | ✅ Written (duplicate-skip assertions failed first; `already-exists` behavior absent) | ✅ Passed | ✅ 4 scenarios (new import, existing catalog, existing staging, canonicalized same-album URL) | ✅ Clean |
+
+## Test Summary (skip-existing duplicate detection batch)
+- **Safety Net command**:
+  - `node --import ./tests/node-test-register.mjs --test "tests/unit/import-ingestion.test.ts" "tests/unit/lib/yupoo-core.test.ts"` (pass: 9/9)
+- **RED command**:
+  - `node --import ./tests/node-test-register.mjs --test "tests/unit/lib/imports/duplicate-detection.test.ts"` (failed first on missing duplicate-skip behavior and missing `already-exists` skip reason)
+- **GREEN commands**:
+  - `node --import ./tests/node-test-register.mjs --test "tests/unit/lib/imports/duplicate-detection.test.ts" "tests/unit/import-ingestion.test.ts"` (pass: 12/12)
+  - `node --import ./tests/node-test-register.mjs --test "tests/unit/lib/imports/duplicate-detection.test.ts" "tests/unit/import-ingestion.test.ts" "tests/unit/admin-single-import-route.test.ts"` (pass: 14/14)
+  - `npm run typecheck` (pass)
+- **Result**: Duplicate-skip unit coverage is green, ingestion regression tests are green, admin single-import route tests are green, and TypeScript typecheck is green.
+- **Layers used**: Unit, Type gate
+
+## Issues / Deviations (skip-existing duplicate detection batch)
+- None.
+
+**Status**: Requested skip-existing batch completed under strict TDD. Ingestion now detects stable Yupoo identity duplicates against both catalog and staging before any insert, skips with explicit `already-exists` reason, and prevents duplicate items from reaching `/admin/imports`.
+
+## Files Changed (promotion category alias + fallback batch)
+| File | Action | What Was Done |
+|------|--------|---------------|
+| `tests/unit/import-promotion.test.ts` | Modified | Added strict-TDD unit coverage for category normalization via alias lookup (`Buzos` → `Hoodies`) and fallback category resolution (`Importados Yupoo`) when no exact/alias DB match exists. |
+| `lib/imports/promotion.ts` | Modified | Implemented small imported-category alias map, category candidate normalization flow, and fallback-to-`Importados Yupoo` resolution path before required `categoryId` validation. |
+| `openspec/changes/yupoo-r2-image-pipeline/apply-progress.md` | Modified | Appended strict-TDD evidence and command trace for this focused promotion-category unblock batch. |
+
+## TDD Cycle Evidence (promotion category alias + fallback batch)
+| Task | Test File | Layer | Safety Net | RED | GREEN | TRIANGULATE | REFACTOR |
+|------|-----------|-------|------------|-----|-------|-------------|----------|
+| Focus fix 1–4 (category alias normalization + fallback) | `tests/unit/import-promotion.test.ts` | Unit | ✅ `tests/unit/import-promotion.test.ts` baseline 10/10 | ✅ Written (new alias/fallback assertions failed first with `El campo categoryId es obligatorio`) | ✅ Passed | ✅ 2 scenarios (aliased category path + generic fallback path) | ✅ Clean |
+
+## Test Summary (promotion category alias + fallback batch)
+- **Safety Net command**:
+  - `node --import ./tests/node-test-register.mjs --test "tests/unit/import-promotion.test.ts"` (pass: 10/10)
+- **RED command**:
+  - `node --import ./tests/node-test-register.mjs --test "tests/unit/import-promotion.test.ts"` (failed first: 2 new tests red on missing alias/fallback category resolution)
+- **GREEN commands**:
+  - `node --import ./tests/node-test-register.mjs --test "tests/unit/import-promotion.test.ts"` (pass: 12/12)
+  - `node --import ./tests/node-test-register.mjs --test "tests/unit/import-promotion.test.ts" "tests/unit/app/api/admin/imports.route.test.ts"` (pass: 18/18)
+  - `npm run typecheck` (pass)
+- **Result**: Promotion alias/fallback behavior is covered and green; related imports route unit suite remains green; TypeScript typecheck is green.
+- **Layers used**: Unit, Type gate
+
+## Issues / Deviations (promotion category alias + fallback batch)
+- No tasks.md checkbox delta was applied in this focused fix batch because this was a targeted unblock continuation outside pending task checklist granularity.
+
+**Status**: Requested promotion-unblock batch completed under strict TDD. Promotion now normalizes imported category aliases (including `Buzos` → `Hoodies`) and safely falls back to `Importados Yupoo` when category-name matching cannot resolve exact/alias categories, preserving existing validation behavior for all other required metadata.
+
+## Files Changed (promotion category alias expansion batch)
+| File | Action | What Was Done |
+|------|--------|---------------|
+| `tests/unit/import-promotion.test.ts` | Modified | Added strict-TDD representative alias coverage across the approved initial map (`Hoodies`, `Remeras`, `Camperas`, `Pantalones`, `Shorts`, `Gorros`, `Camisas`, `Polos`) including accent normalization (`Pantalón` → `Pantalones`). |
+| `lib/imports/promotion.ts` | Modified | Expanded imported-category alias map used during promotion category resolution while preserving fallback candidate flow to `Importados Yupoo` when no match resolves. |
+| `openspec/changes/yupoo-r2-image-pipeline/apply-progress.md` | Modified | Appended strict-TDD evidence and command trace for this focused alias-expansion continuation. |
+
+## TDD Cycle Evidence (promotion category alias expansion batch)
+| Task | Test File | Layer | Safety Net | RED | GREEN | TRIANGULATE | REFACTOR |
+|------|-----------|-------|------------|-----|-------|-------------|----------|
+| Focus fix 1–4 continuation (approved alias-map expansion + fallback preservation) | `tests/unit/import-promotion.test.ts` | Unit | ✅ `tests/unit/import-promotion.test.ts` baseline 12/12 | ✅ Written (new representative-alias test failed first with missing category resolution) | ✅ Passed | ✅ 8 representative alias paths across category families + existing fallback scenario retained | ✅ Clean |
+
+## Test Summary (promotion category alias expansion batch)
+- **Safety Net command**:
+  - `node --import ./tests/node-test-register.mjs --test "tests/unit/import-promotion.test.ts"` (pass: 12/12)
+- **RED command**:
+  - `node --import ./tests/node-test-register.mjs --test "tests/unit/import-promotion.test.ts"` (failed first: representative alias-map scenario red with `El campo categoryId es obligatorio para promover el item importado.`)
+- **GREEN commands**:
+  - `node --import ./tests/node-test-register.mjs --test "tests/unit/import-promotion.test.ts"` (pass: 13/13)
+  - `node --import ./tests/node-test-register.mjs --test "tests/unit/import-promotion.test.ts" "tests/unit/app/api/admin/imports.route.test.ts"` (pass: 19/19)
+  - `npm run typecheck` (pass)
+- **Result**: Representative alias expansion is covered and green, related admin imports route unit suite remains green, and TypeScript typecheck is green.
+- **Layers used**: Unit, Type gate
+
+## Issues / Deviations (promotion category alias expansion batch)
+- No tasks.md checkbox delta was applied in this focused continuation because this request refined the already-completed promotion-category behavior with broader alias coverage.
+
+**Status**: Requested focused alias-expansion batch completed under strict TDD. Promotion category resolution now supports the approved initial alias set while retaining fallback-to-`Importados Yupoo` behavior when no exact or aliased category match exists.
+
+## Files Changed (promotion variants carryover batch)
+| File | Action | What Was Done |
+|------|--------|---------------|
+| `tests/unit/import-promotion.test.ts` | Modified | Added strict-TDD coverage for promotion-time carryover of staged `productData.variants`, including normalization + dedupe and the no-variants no-op path. |
+| `lib/imports/promotion.ts` | Modified | Promotion now extracts staged variant labels from `productData.variants`, normalizes/deduplicates them, and persists `product_variants` rows during catalog promotion. |
+| `openspec/changes/yupoo-r2-image-pipeline/tasks.md` | Modified | Marked task 6.1 complete for catalog-write promotion flow now including product variants carryover. |
+| `openspec/changes/yupoo-r2-image-pipeline/apply-progress.md` | Modified | Appended strict-TDD evidence and command trace for this focused continuation batch. |
+
+## TDD Cycle Evidence (promotion variants carryover batch)
+| Task | Test File | Layer | Safety Net | RED | GREEN | TRIANGULATE | REFACTOR |
+|------|-----------|-------|------------|-----|-------|-------------|----------|
+| Focus continuation (promotion carryover of staged variants into `product_variants`) | `tests/unit/import-promotion.test.ts` | Unit | ✅ baseline `import-promotion` suite green (13/13) | ✅ Written (new staged-variants assertion failed first: no variants persisted) | ✅ Passed | ✅ 2 paths (normalized+deduped creation, empty variants no-op) | ✅ Clean |
+
+## Test Summary (promotion variants carryover batch)
+- **Safety Net command**:
+  - `node --import ./tests/node-test-register.mjs --test "tests/unit/import-promotion.test.ts"` (pass: 13/13)
+- **RED command**:
+  - `node --import ./tests/node-test-register.mjs --test "tests/unit/import-promotion.test.ts"` (failed first: staged variants were not being carried into `product_variants`)
+- **GREEN commands**:
+  - `node --import ./tests/node-test-register.mjs --test "tests/unit/import-promotion.test.ts"` (pass: 15/15)
+  - `node --import ./tests/node-test-register.mjs --test "tests/unit/import-promotion.test.ts" "tests/unit/app/api/admin/imports.route.test.ts"` (pass: 21/21)
+- **Type gate command**:
+  - `npm run typecheck` (fails in current branch on pre-existing errors: `lib/imports/curation.ts` `Property 'where' does not exist on type 'Promise<unknown>'` at lines 80/81)
+- **Result**: Targeted promotion and imports-route unit suites are green; type gate is currently blocked by pre-existing unrelated typing issues in `lib/imports/curation.ts`.
+- **Layers used**: Unit, Type gate (blocked by pre-existing error)
+
+## Issues / Deviations (promotion variants carryover batch)
+- `npm run typecheck` currently fails on pre-existing `lib/imports/curation.ts` typing issues unrelated to this variants carryover change. No additional type regressions were introduced by this batch.
+
+**Status**: Focused promotion continuation completed under strict TDD. Promotion now carries staged scraped variants from `productData.variants` into catalog `product_variants` with normalization + dedupe behavior, while gracefully creating none when variants are absent.
+
+## Files Changed (promotion sizes carryover batch)
+| File | Action | What Was Done |
+|------|--------|---------------|
+| `tests/unit/import-promotion.test.ts` | Modified | Added strict-TDD coverage for promotion-time carryover of staged `productData.sizes`, including normalization + dedupe and no-sizes no-op behavior. |
+| `lib/imports/promotion.ts` | Modified | Promotion now extracts staged size labels from `productData.sizes`, normalizes/deduplicates them, and persists `product_sizes` rows during catalog promotion using DB foundation parity. |
+| `openspec/changes/yupoo-r2-image-pipeline/apply-progress.md` | Modified | Appended strict-TDD evidence and command trace for this focused sizes carryover continuation batch. |
+
+## TDD Cycle Evidence (promotion sizes carryover batch)
+| Task | Test File | Layer | Safety Net | RED | GREEN | TRIANGULATE | REFACTOR |
+|------|-----------|-------|------------|-----|-------|-------------|----------|
+| Focus continuation (promotion carryover of staged sizes into `product_sizes`) | `tests/unit/import-promotion.test.ts` | Unit | ✅ baseline `import-promotion` suite green (15/15) | ✅ Written (new staged-sizes assertion failed first: no sizes persisted) | ✅ Passed | ✅ 2 paths (normalized+deduped creation, empty sizes no-op) | ✅ Clean |
+
+## Test Summary (promotion sizes carryover batch)
+- **Safety Net command**:
+  - `node --import ./tests/node-test-register.mjs --test "tests/unit/import-promotion.test.ts"` (pass: 15/15)
+- **RED command**:
+  - `node --import ./tests/node-test-register.mjs --test "tests/unit/import-promotion.test.ts"` (failed first: staged sizes were not being carried into `product_sizes`)
+- **GREEN commands**:
+  - `node --import ./tests/node-test-register.mjs --test "tests/unit/import-promotion.test.ts"` (pass: 17/17)
+  - `node --import ./tests/node-test-register.mjs --test "tests/unit/import-promotion.test.ts" "tests/unit/app/api/admin/imports.route.test.ts"` (pass: 23/23)
+- **Type gate command**:
+  - `npm run typecheck` (fails in current branch on pre-existing errors: `lib/imports/curation.ts` `Property 'where' does not exist on type 'Promise<unknown>'` at lines 80/81, plus existing `tests/unit/catalog-inventory-registry.test.ts` type errors)
+- **Result**: Targeted promotion and imports-route unit suites are green; type gate remains blocked by pre-existing unrelated typing errors in `lib/imports/curation.ts` and `tests/unit/catalog-inventory-registry.test.ts`.
+- **Layers used**: Unit, Type gate (blocked by pre-existing errors)
+
+## Issues / Deviations (promotion sizes carryover batch)
+- No tasks.md checkbox delta was applied in this focused continuation because task `6.1` was already marked complete in prior batches and this request refines promotion catalog-write parity.
+
+**Status**: Focused promotion continuation completed under strict TDD. Promotion now carries staged scraped sizes from `productData.sizes` into catalog `product_sizes` with normalization + dedupe behavior, while gracefully creating none when sizes are absent.

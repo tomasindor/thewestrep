@@ -438,32 +438,38 @@ function extractYupooAlbumDataFromHtml(sourceUrl: string, html: string) {
     pushCandidate(match);
   }
 
-  // 3. Deduplicar variantes (small/big/medium/original) manteniendo una por familia
-  const deduped = canonicalizeYupooImageCandidates(collected);
+// 3. Deduplicar variantes (small/big/medium/original) manteniendo una por familia
+const deduped = canonicalizeYupooImageCandidates(collected);
 
-  // 4. Construir array ordenado: preview → regulares → PNG/medidas
-  const images: string[] = [];
-  const usedUrls = new Set<string>();
+// 4. Construir array ordenado: preview → regulares → PNG/medidas
+const images: string[] = [];
+const usedUrls = new Set<string>();
+const MAX_IMAGES = 30;
 
-  if (previewImage) {
-    const previewKey = getYupooCanonicalKey(previewImage);
-    const bestPreview = deduped.find((url) => {
-      try {
-        return getYupooCanonicalKey(url) === previewKey;
-      } catch {
-        return false;
-      }
-    }) ?? previewImage;
+if (previewImage) {
+const previewKey = getYupooCanonicalKey(previewImage);
+const bestPreview = deduped.find((url) => {
+try {
+return getYupooCanonicalKey(url) === previewKey;
+} catch {
+return false;
+}
+}) ?? previewImage;
 
-    images.push(bestPreview);
-    usedUrls.add(bestPreview);
-  }
+images.push(bestPreview);
+usedUrls.add(bestPreview);
+}
 
-  const remaining = deduped.filter((url) => !usedUrls.has(url));
-  const regular = remaining.filter((url) => !shouldPushImageToEnd(url));
-  const trailing = remaining.filter((url) => shouldPushImageToEnd(url));
+const remaining = deduped.filter((url) => !usedUrls.has(url));
+const regular = remaining.filter((url) => !shouldPushImageToEnd(url));
+const trailing = remaining.filter((url) => shouldPushImageToEnd(url));
 
-  images.push(...regular, ...trailing);
+// Limitar a 30 imágenes en total (incluyendo preview)
+const availableSlots = MAX_IMAGES - images.length;
+const regularLimited = regular.slice(0, Math.max(0, availableSlots - Math.min(trailing.length, availableSlots)));
+const trailingLimited = trailing.slice(0, Math.max(0, availableSlots - regularLimited.length));
+
+images.push(...regularLimited, ...trailingLimited);
 
   const weidianUrl = extractWeidianUrlFromAlbumHtml(html);
 

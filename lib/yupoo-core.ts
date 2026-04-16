@@ -19,6 +19,25 @@ export interface YupooImageCandidate {
   previewUrl: string;
 }
 
+export function canonicalizeYupooSourceUrl(sourceUrl: string) {
+  const url = new URL(sourceUrl);
+
+  url.protocol = "https:";
+  url.hostname = url.hostname.toLowerCase();
+  url.hash = "";
+  url.search = "";
+  url.pathname = url.pathname.replace(/\/+$/g, "") || "/";
+
+  return url.toString();
+}
+
+export function getYupooAlbumIdentity(sourceUrl: string) {
+  const canonicalSourceUrl = canonicalizeYupooSourceUrl(sourceUrl);
+  const parsed = new URL(canonicalSourceUrl);
+
+  return `${parsed.hostname}${parsed.pathname}`.toLowerCase();
+}
+
 function normalizeImageUrl(value: string | undefined | null) {
   const normalized = value?.trim();
 
@@ -273,9 +292,9 @@ export async function extractYupooImages(sourceUrl: string, options?: { maxImage
     }
   }
 
-  const images = canonicalizeYupooImageCandidates(uniqueValues(Array.from(collected)));
-  const maxImages = options?.maxImages ?? 24;
-  const limitedImages = maxImages > 0 ? images.slice(0, maxImages) : images;
+const images = canonicalizeYupooImageCandidates(uniqueValues(Array.from(collected)));
+const maxImages = options?.maxImages ?? 30;
+const limitedImages = maxImages > 0 ? images.slice(0, maxImages) : images;
 
   const imageCandidates: YupooImageCandidate[] = limitedImages.map((imageUrl) => {
     try {

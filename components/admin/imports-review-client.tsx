@@ -83,10 +83,14 @@ export function ImportsReviewClient({ initialItems }: ImportsReviewClientProps) 
   const [activeImageIndexByItem, setActiveImageIndexByItem] = useState<Record<string, number>>({});
   const [undoStack, setUndoStack] = useState<RejectUndoEntry[]>([]);
   const [pendingImageId, setPendingImageId] = useState<string | null>(null);
-  const [promoting, setPromoting] = useState(false);
-  const [clearingQueue, setClearingQueue] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [promotionMessage, setPromotionMessage] = useState<string | null>(null);
+const [promoting, setPromoting] = useState(false);
+const [clearingQueue, setClearingQueue] = useState(false);
+const [deletingItemId, setDeletingItemId] = useState<string | null>(null);
+const [updatingItemId, setUpdatingItemId] = useState<string | null>(null);
+const [editingField, setEditingField] = useState<"name" | "price" | "category" | null>(null);
+const [editValue, setEditValue] = useState<string>("");
+const [error, setError] = useState<string | null>(null);
+const [promotionMessage, setPromotionMessage] = useState<string | null>(null);
 
   const activeItem = useMemo(
     () => items.find((item) => item.id === activeItemId) ?? items[0] ?? null,
@@ -269,41 +273,125 @@ export function ImportsReviewClient({ initialItems }: ImportsReviewClientProps) 
     await promoteItems([itemId], "promote-item");
   }
 
-  async function clearImportsQueue() {
-    const confirmed = window.confirm("¿Querés vaciar toda la cola de importaciones? Esto solo borra staging/import queue y no toca catálogo.");
+async function clearImportsQueue() {
+  const confirmed = window.confirm("¿Querés vaciar toda la cola de importaciones? Esto solo borra staging/import queue y no toca catálogo.");
 
-    if (!confirmed) {
-      return;
-    }
-
-    setClearingQueue(true);
-    setError(null);
-    setPromotionMessage(null);
-
-    try {
-      const response = await fetch("/api/admin/imports", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "clear-queue" }),
-      });
-      const payload = (await response.json()) as {
-        error?: string;
-        data?: { deletedJobs: number };
-      };
-
-      if (!response.ok || !payload.data) {
-        throw new Error(payload.error ?? "No se pudo vaciar la cola de importaciones.");
-      }
-
-      setItems([]);
-      setActiveItemId(null);
-      setPromotionMessage(`Cola vaciada. Jobs eliminados: ${payload.data.deletedJobs}.`);
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "No se pudo vaciar la cola de importaciones.");
-    } finally {
-      setClearingQueue(false);
-    }
+  if (!confirmed) {
+    return;
   }
+
+  setClearingQueue(true);
+  setError(null);
+  setPromotionMessage(null);
+
+  try {
+    const response = await fetch("/api/admin/imports", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "clear-queue" }),
+    });
+    const payload = (await response.json()) as {
+      error?: string;
+      data?: { deletedJobs: number };
+    };
+
+    if (!response.ok || !payload.data) {
+      throw new Error(payload.error ?? "No se pudo vaciar la cola de importaciones.");
+    }
+
+    setItems([]);
+    setActiveItemId(null);
+    setPromotionMessage(`Cola vaciada. Jobs eliminados: ${payload.data.deletedJobs}.`);
+  } catch (requestError) {
+    setError(requestError instanceof Error ? requestError.message : "No se pudo vaciar la cola de importaciones.");
+  } finally {
+    setClearingQueue(false);
+  }
+}
+
+async function deleteSingleProduct(itemId: string) {
+  const confirmed = window.confirm("¿Querés eliminar este producto de la cola de importación? Esta acción no se puede deshacer.");
+
+  if (!confirmed) {
+    return;
+  }
+
+  setDeletingItemId(itemId);
+  setError(null);
+
+  try {
+    const response = await fetch("/api/admin/imports", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "delete-item", itemId }),
+    });
+    const payload = (await response.json()) as {
+      error?: string;
+      data?: { deleted: boolean; importItemId?: string };
+    };
+
+    if (!response.ok || !payload.data?.deleted) {
+      throw new Error(payload.error ?? "No se pudo eliminar el producto.");
+    }
+
+    // Remove the item from the list and update active item
+    setItems((currentItems) => {
+      const updatedItems = currentItems.filter((item) => item.id !== itemId);
+      
+      // If we deleted the active item, switch to the first available item
+      if (activeItemId === itemId) {
+        setActiveItemId(updatedItems.length > 0 ? updatedItems[0].id : null);
+      }
+      
+      return updatedItems;
+    });
+
+    setPromotionMessage(`Producto eliminado de la cola.`);
+  } catch (requestError) {
+    setError(requestError instanceof Error ? requestError.message : "No se pudo eliminar el producto.");
+  } finally {
+    setDeletingItemId(null);
+  }
+}
+
+async function updateProductData(itemId: string, data: { finalName?: string; finalPrice?: number; categoryName?: string }) {
+  setUpdatingItemId(itemId);
+  setError(null);
+
+  try {
+    const response = await fetch("/api/admin/imports", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "update-item", itemId, updateData: data }),
+    });
+    const payload = (await response.json()) as {
+      error?: string;
+      data?: { updated: boolean };
+    };
+
+    if (!response.ok || !payload.data?.updated) {
+      throw new Error(payload.error ?? "No se pudo actualizar el producto.");
+    }
+
+    // Update the item in the list
+    setItems((currentItems) => {
+      return currentItems.map((item) => {
+        if (item.id !== itemId) return item;
+        
+        return {
+          ...item,
+          finalName: data.finalName ?? item.finalName,
+          finalPrice: data.finalPrice ?? item.finalPrice,
+          brand: data.categoryName !== undefined ? data.categoryName : item.brand,
+        };
+      });
+    });
+  } catch (requestError) {
+    setError(requestError instanceof Error ? requestError.message : "No se pudo actualizar el producto.");
+  } finally {
+    setUpdatingItemId(null);
+  }
+}
 
   if (items.length === 0 || !activeItem) {
     return (
@@ -361,34 +449,171 @@ export function ImportsReviewClient({ initialItems }: ImportsReviewClientProps) 
                 <p className="font-medium text-white">{index + 1}. {item.finalName ?? item.productName ?? "Sin nombre"}</p>
                 <p className="text-xs text-slate-400">{item.activeImageCount} imágenes activas · {item.promotionEligible ? "elegible" : "bloqueado"} · media {item.mediaStatus}</p>
               </button>
-              <button
-                type="button"
-                className={compactGhostCtaClassName}
-                disabled={promoting}
-                onClick={() => promoteSingleProduct(item.id)}
-              >
-                Promover este producto
-              </button>
-            </div>
-          ))}
-        </aside>
+<div className="flex flex-wrap gap-2">
+  <button
+    type="button"
+    className={compactGhostCtaClassName}
+    disabled={promoting || (deletingItemId === item.id)}
+    onClick={() => deleteSingleProduct(item.id)}
+  >
+    {deletingItemId === item.id ? "Eliminando..." : "Eliminar"}
+  </button>
+  <button
+    type="button"
+    className={compactGhostCtaClassName}
+    disabled={promoting}
+    onClick={() => promoteSingleProduct(item.id)}
+  >
+    Promover este producto
+  </button>
+</div>
+</div>
+))}
+</aside>
 
-        <article className="space-y-4 rounded-[1.4rem] border border-white/10 bg-white/[0.03] p-4">
-          <header className="space-y-1">
-            <p className="text-xs tracking-[0.2em] text-slate-400 uppercase">Producto {activeProductIndex + 1} de {items.length}</p>
-            <h2 className="text-xl text-white">{activeItem.finalName ?? activeItem.productName ?? "Producto importado"}</h2>
-            <p className="text-xs text-slate-400">{activeItem.sourceReference ?? "Sin referencia de origen"}</p>
-            <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-300">
-              <dt className="text-slate-400">Nombre final</dt>
-              <dd>{activeItem.finalName ?? activeItem.productName ?? "Sin nombre"}</dd>
-              <dt className="text-slate-400">Precio final</dt>
-              <dd>{typeof activeItem.finalPrice === "number" ? `$${activeItem.finalPrice}` : "Sin precio"}</dd>
-              <dt className="text-slate-400">Marca</dt>
-              <dd>{activeItem.brand ?? "Sin marca"}</dd>
-              <dt className="text-slate-400">Imágenes activas</dt>
-              <dd>{activeItem.activeImageCount}</dd>
-            </dl>
-          </header>
+<article className="space-y-4 rounded-[1.4rem] border border-white/10 bg-white/[0.03] p-4">
+<header className="space-y-3">
+<p className="text-xs tracking-[0.2em] text-slate-400 uppercase">Producto {activeProductIndex + 1} de {items.length}</p>
+<p className="text-xs text-slate-400">{activeItem.sourceReference ?? "Sin referencia de origen"}</p>
+
+<div className="grid grid-cols-2 gap-4">
+  {/* Nombre */}
+  <div className="space-y-1">
+    <label className="text-xs text-slate-400">Nombre</label>
+    {editingField === "name" ? (
+      <input
+        type="text"
+        className="w-full rounded-md border border-white/10 bg-white/5 px-2 py-1.5 text-sm text-white focus:border-[#d28aa3] focus:outline-none"
+        value={editValue}
+        onChange={(e) => setEditValue(e.target.value)}
+        onBlur={() => {
+          if (editValue.trim() && activeItem) {
+            updateProductData(activeItem.id, { finalName: editValue.trim() });
+          }
+          setEditingField(null);
+          setEditValue("");
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && editValue.trim() && activeItem) {
+            updateProductData(activeItem.id, { finalName: editValue.trim() });
+            setEditingField(null);
+            setEditValue("");
+          } else if (e.key === "Escape") {
+            setEditingField(null);
+            setEditValue("");
+          }
+        }}
+        autoFocus
+      />
+    ) : (
+      <button
+        type="button"
+        className="w-full text-left text-sm text-white hover:text-[#d28aa3] transition"
+        onClick={() => {
+          setEditingField("name");
+          setEditValue(activeItem.finalName ?? activeItem.productName ?? "");
+        }}
+      >
+        {activeItem.finalName ?? activeItem.productName ?? "Sin nombre"}
+      </button>
+    )}
+  </div>
+
+  {/* Precio */}
+  <div className="space-y-1">
+    <label className="text-xs text-slate-400">Precio (ARS)</label>
+    {editingField === "price" ? (
+      <input
+        type="number"
+        className="w-full rounded-md border border-white/10 bg-white/5 px-2 py-1.5 text-sm text-white focus:border-[#d28aa3] focus:outline-none"
+        value={editValue}
+        onChange={(e) => setEditValue(e.target.value)}
+        onBlur={() => {
+          const price = Number(editValue);
+          if (price > 0 && activeItem) {
+            updateProductData(activeItem.id, { finalPrice: price });
+          }
+          setEditingField(null);
+          setEditValue("");
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && editValue && activeItem) {
+            const price = Number(editValue);
+            if (price > 0) {
+              updateProductData(activeItem.id, { finalPrice: price });
+            }
+            setEditingField(null);
+            setEditValue("");
+          } else if (e.key === "Escape") {
+            setEditingField(null);
+            setEditValue("");
+          }
+        }}
+        autoFocus
+      />
+    ) : (
+      <button
+        type="button"
+        className="w-full text-left text-sm text-white hover:text-[#d28aa3] transition"
+        onClick={() => {
+          setEditingField("price");
+          setEditValue(String(activeItem.finalPrice ?? 0));
+        }}
+      >
+        {typeof activeItem.finalPrice === "number" ? `$${activeItem.finalPrice}` : "Sin precio"}
+      </button>
+    )}
+  </div>
+
+  {/* Categoría/Marca */}
+  <div className="space-y-1">
+    <label className="text-xs text-slate-400">Categoría/Marca</label>
+    {editingField === "category" ? (
+      <input
+        type="text"
+        className="w-full rounded-md border border-white/10 bg-white/5 px-2 py-1.5 text-sm text-white focus:border-[#d28aa3] focus:outline-none"
+        value={editValue}
+        onChange={(e) => setEditValue(e.target.value)}
+        onBlur={() => {
+          if (editValue.trim() && activeItem) {
+            updateProductData(activeItem.id, { categoryName: editValue.trim() });
+          }
+          setEditingField(null);
+          setEditValue("");
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && editValue.trim() && activeItem) {
+            updateProductData(activeItem.id, { categoryName: editValue.trim() });
+            setEditingField(null);
+            setEditValue("");
+          } else if (e.key === "Escape") {
+            setEditingField(null);
+            setEditValue("");
+          }
+        }}
+        autoFocus
+      />
+    ) : (
+      <button
+        type="button"
+        className="w-full text-left text-sm text-white hover:text-[#d28aa3] transition"
+        onClick={() => {
+          setEditingField("category");
+          setEditValue(activeItem.brand ?? "");
+        }}
+      >
+        {activeItem.brand ?? "Sin marca"}
+      </button>
+    )}
+  </div>
+
+  {/* Info */}
+  <div className="space-y-1">
+    <label className="text-xs text-slate-400">Imágenes activas</label>
+    <p className="text-sm text-slate-300">{activeItem.activeImageCount}</p>
+  </div>
+</div>
+</header>
 
           {currentImage ? (
             <>

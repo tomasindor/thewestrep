@@ -15,6 +15,13 @@
 - [x] 2.5 Update `lib/imports/promotion.ts` to skip products with fewer than 2 useful (active non-size-guide) images after filtering; mark as ineligible with explicit reason "insufficient useful images".
 - [x] 2.6 Fix queue navigation bug: after reject or delete of current image, properly advance to next available image or handle empty state gracefully.
 
+## Phase 2.5: Duplicate detection — skip already-existing products
+
+- [x] 2.7 Add duplicate detection against catalog products in `lib/imports/ingestion.ts`: check if album source URL or product identity already exists in `products.source_url` or `products.album_reference` before creating staging records.
+- [x] 2.8 Add duplicate detection against staging queue: check if album source URL or canonical key already exists in `import_items.source_url` or `import_items.album_reference` before creating new staging records.
+- [x] 2.9 Implement skip-existing behavior: when a duplicate is detected, return early with `skipped: true` and `skipReason: "already-exists"` without creating any staging records; ensure this happens AFTER price validation but BEFORE DB insert.
+- [x] 2.10 Add unit tests for duplicate detection: `tests/unit/lib/imports/duplicate-detection.test.ts` covering: (a) new album creates staging record, (b) existing catalog product triggers skip, (c) existing staging record triggers skip, (d) same album different source URL format still detects duplicate.
+
 ## Phase 3: Review UI — display direct Yupoo URLs, curate active/inactive
 
 - [x] 3.1 Update `components/admin/imports-review-client.tsx` to render images from `source_url` (direct Yupoo URLs), not from R2 pre-uploaded assets.
@@ -44,7 +51,7 @@
 
 ## Phase 6: Integration — wire promotion to catalog tables
 
-- [ ] 6.1 Update `lib/imports/promotion.ts` to write promoted products to `products` and `product_images` catalog tables with full variant manifest after R2 upload completes.
+- [x] 6.1 Update `lib/imports/promotion.ts` to write promoted products to `products` and `product_images` catalog tables with full variant manifest after R2 upload completes.
 - [ ] 6.2 Update `app/api/admin/imports/route.ts` to handle POST promotion request with eligibility check and deferred media generation.
 - [ ] 6.3 Add integration tests for full promotion flow: staging → review → promote → R2 upload → catalog write.
 
@@ -68,20 +75,21 @@
 | Phase | Tasks | Focus |
 |-------|-------|-------|
 | 1 | 3 | Schema + price validation |
-| 2 | 4 | Staging with direct URLs only |
+| 2 | 6 | Staging with direct URLs only |
+| 2.5 | 4 | Duplicate detection against catalog + staging queue |
 | 3 | 6 | Review UI uses direct URLs + preview URLs + 404 handling |
 | 4 | 4 | Promotion → R2 + variants |
 | 5 | 4 | Eligibility + block reasons |
 | 6 | 3 | Catalog integration |
 | 7 | 6 | Cleanup + verification |
 | 8 | 3 | Final regression testing |
-| **Total** | **33** | |
+| **Total** | **37** | |
 
 ## Implementation Order
 
 - Phase 1 first: new schema fields are required by everything else
 - Phase 2 second: core ingestion logic without R2
-- Phase 3 third: review UI depends on having staging data
+- Phase 2.5 third: duplicate detection before any staging insert (against catalog and staging queue)
 - Phase 4 fourth: promotion with R2 upload only happens after curation
 - Phases 5-6: eligibility and catalog write build on promotion
 - Phase 7 last: cleanup after everything works

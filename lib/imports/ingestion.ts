@@ -5,7 +5,13 @@ import { importImages, importItems, importJobs } from "@/lib/db/schema";
 import { classifyImportImageCandidate } from "@/lib/imports/heuristics";
 import { validateImportPrice } from "@/lib/imports/price-validator";
 import { createId } from "@/lib/utils";
-import { canonicalizeYupooImageCandidates, extractYupooImages, getYupooCanonicalKey } from "@/lib/yupoo-core";
+import {
+  canonicalizeYupooImageCandidates,
+  canonicalizeYupooSourceUrl,
+  extractYupooImages,
+  getYupooAlbumIdentity,
+  getYupooCanonicalKey,
+} from "@/lib/yupoo-core";
 
 export type YupooImportSource = "bulk" | "admin";
 
@@ -38,6 +44,7 @@ export interface PreparedR2Write {
 
 export interface IngestionDependencies {
   db: {
+    query?: Record<string, any>;
     insert(table: unknown): { values(values: unknown): Promise<unknown> };
     update(table: unknown): { set(values: unknown): { where(predicate: unknown): Promise<unknown> } };
   };
@@ -50,6 +57,7 @@ export interface IngestionDependencies {
   downloadImage?: (url: string) => Promise<DownloadedImage>;
   generateVariants?: (input: { source: Buffer; originalKey: string }) => Promise<unknown>;
   storeInR2?: (write: PreparedR2Write) => Promise<void>;
+  findYupooDuplicate?: (identity: YupooSourceIdentity) => Promise<YupooDuplicateLocation | null>;
 }
 
 export interface YupooIngestionResult {
@@ -60,7 +68,15 @@ export interface YupooIngestionResult {
   skippedHeuristicImages?: number;
   plannedR2Writes: number;
   skipped: boolean;
-  skipReason?: "missing-price" | "insufficient-useful-images";
+  skipReason?: "missing-price" | "insufficient-useful-images" | "already-exists";
+}
+
+export type YupooDuplicateLocation = "catalog" | "staging";
+
+export interface YupooSourceIdentity {
+  canonicalSourceUrl: string;
+  albumIdentity: string;
+  matchCandidates: string[];
 }
 
 export interface LegacyBulkAlbumPayload {
@@ -71,6 +87,99 @@ export interface LegacyBulkAlbumPayload {
 }
 
 const IMMUTABLE_CACHE_CONTROL = "public, max-age=31536000, immutable";
+
+function normalizeIdentityCandidate(value: string | null | undefined) {
+  const normalized = value?.trim();
+  return normalized ? normalized : null;
+}
+
+function normalizePathIdentity(value: string) {
+  const withoutHash = value.split("#", 1)[0] ?? value;
+  const withoutQuery = withoutHash.split("?", 1)[0] ?? withoutHash;
+  const normalized = withoutQuery.trim().replace(/\/+$/g, "");
+
+  if (!normalized) {
+    return "/";
+  }
+
+  return normalized.startsWith("/") ? normalized : `/${normalized}`;
+}
+
+function buildYupooSourceIdentity(input: { sourceUrl: string; sourceReference?: string }) {
+  const canonicalSourceUrl = canonicalizeYupooSourceUrl(input.sourceUrl);
+  const albumIdentity = getYupooAlbumIdentity(canonicalSourceUrl);
+  const parsedCanonicalSource = new URL(canonicalSourceUrl);
+  const sourcePathIdentity = normalizePathIdentity(parsedCanonicalSource.pathname);
+
+  const rawCandidates = new Set<string>([
+    input.sourceUrl,
+    canonicalSourceUrl,
+    albumIdentity,
+    sourcePathIdentity,
+  ]);
+
+  const normalizedSourceReference = normalizeIdentityCandidate(input.sourceReference);
+
+  if (normalizedSourceReference) {
+    rawCandidates.add(normalizedSourceReference);
+
+    if (/^https?:\/\//i.test(normalizedSourceReference)) {
+      try {
+        const canonicalReference = canonicalizeYupooSourceUrl(normalizedSourceReference);
+        rawCandidates.add(canonicalReference);
+        rawCandidates.add(getYupooAlbumIdentity(canonicalReference));
+        rawCandidates.add(normalizePathIdentity(new URL(canonicalReference).pathname));
+      } catch {
+        // Keep raw sourceReference fallback.
+      }
+    } else {
+      rawCandidates.add(normalizePathIdentity(normalizedSourceReference));
+    }
+  }
+
+  const matchCandidates = Array.from(rawCandidates)
+    .map((candidate) => normalizeIdentityCandidate(candidate))
+    .filter((candidate): candidate is string => Boolean(candidate));
+
+  return {
+    canonicalSourceUrl,
+    albumIdentity,
+    matchCandidates,
+  } satisfies YupooSourceIdentity;
+}
+
+async function findYupooDuplicateFromDb(
+  db: IngestionDependencies["db"],
+  identity: YupooSourceIdentity,
+): Promise<YupooDuplicateLocation | null> {
+  const query = db.query;
+
+  if (!query) {
+    return null;
+  }
+
+  for (const candidate of identity.matchCandidates) {
+    const catalogMatch = await query.products?.findFirst?.({
+      where: (productsTable: typeof import("@/lib/db/schema").products, { sql }: { sql: any }) =>
+        sql`lower(${productsTable.sourceUrl}) = lower(${candidate})`,
+    });
+
+    if (catalogMatch) {
+      return "catalog";
+    }
+
+    const stagingMatch = await query.importJobs?.findFirst?.({
+      where: (importJobsTable: typeof import("@/lib/db/schema").importJobs, { sql }: { sql: any }) =>
+        sql`lower(${importJobsTable.sourceReference}) = lower(${candidate})`,
+    });
+
+    if (stagingMatch) {
+      return "staging";
+    }
+  }
+
+  return null;
+}
 
 export function parseYupooUrl(value: string) {
   let parsed: URL;
@@ -291,6 +400,28 @@ export async function ingestYupooSource(input: YupooIngestionInput, dependencies
     finalPrice: priceValidation.price,
     priceArs: priceValidation.price,
   };
+
+  const identity = buildYupooSourceIdentity({
+    sourceUrl: sourceUrl.href,
+    sourceReference: input.sourceReference,
+  });
+
+  const duplicateLocation = dependencies.findYupooDuplicate
+    ? await dependencies.findYupooDuplicate(identity)
+    : await findYupooDuplicateFromDb(dependencies.db, identity);
+
+  if (duplicateLocation) {
+    return {
+      importJobId: null,
+      importItemId: null,
+      importedImages: 0,
+      skippedDuplicateImages: 0,
+      skippedHeuristicImages: 0,
+      plannedR2Writes: 0,
+      skipped: true,
+      skipReason: "already-exists",
+    };
+  }
 
   const candidates = await resolveCandidateImageUrls({ ...input, sourceUrl: sourceUrl.href }, dependencies);
   const deduplicated = canonicalizeYupooImageCandidates(candidates.map((candidate) => candidate.url));

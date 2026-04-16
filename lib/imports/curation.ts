@@ -61,6 +61,77 @@ export async function clearImportsQueueFromDb(db: {
   };
 }
 
+export async function deleteImportItemFromDb(db: {
+  query: {
+    importItems: {
+      findFirst(input: { where: any }): Promise<{ id: string; importJobId: string } | undefined>;
+    };
+  };
+  delete(table: unknown): { where(predicate: any): Promise<unknown> };
+}, importItemId: string) {
+  const item = await db.query.importItems.findFirst({
+    where: eq(importItems.id, importItemId),
+  });
+
+  if (!item) {
+    return { deleted: false, reason: "not_found" };
+  }
+
+  await db.delete(importItems).where(eq(importItems.id, importItemId));
+  await db.delete(importJobs).where(eq(importJobs.id, item.importJobId));
+
+  return { deleted: true, importItemId, importJobId: item.importJobId };
+}
+
+export interface UpdateImportItemData {
+  finalName?: string;
+  finalPrice?: number;
+  categoryName?: string;
+}
+
+export async function updateImportItemFromDb(db: {
+  query: {
+    importItems: {
+      findFirst(input: { where: any }): Promise<{ id: string; productData: Record<string, unknown> | null; price: number | null } | undefined>;
+    };
+  };
+  update(table: unknown): { set(values: any): { where(predicate: any): Promise<unknown> } };
+}, importItemId: string, data: UpdateImportItemData) {
+  const item = await db.query.importItems.findFirst({
+    where: eq(importItems.id, importItemId),
+  });
+
+  if (!item) {
+    return { updated: false, reason: "not_found" };
+  }
+
+  const updates: any = {};
+  const productDataUpdate: Record<string, unknown> = item.productData ?? {};
+
+  if (data.finalName !== undefined) {
+    productDataUpdate.finalName = data.finalName;
+  }
+
+  if (data.categoryName !== undefined) {
+    productDataUpdate.categoryName = data.categoryName;
+  }
+
+  if (Object.keys(productDataUpdate).length > 0) {
+    updates.productData = productDataUpdate;
+  }
+
+  if (data.finalPrice !== undefined) {
+    updates.price = data.finalPrice;
+  }
+
+  if (Object.keys(updates).length > 0) {
+    updates.updatedAt = new Date();
+    await db.update(importItems).set(updates).where(eq(importItems.id, importItemId));
+  }
+
+  return { updated: true, importItemId, ...data };
+}
+
 export interface ApplyImportImageActionInput {
   imageId: string;
   action: ImportReviewAction;

@@ -9,6 +9,8 @@ import {
   importImages,
   importItems,
   productImages,
+  productSizes,
+  productVariants,
   products,
   productSizeGuides,
 } from "@/lib/db/schema";
@@ -92,6 +94,22 @@ interface ProductImageInsertInput {
   createdAt: Date;
 }
 
+interface ProductVariantInsertInput {
+  id: string;
+  productId: string;
+  label: string;
+  position: number;
+  createdAt: Date;
+}
+
+interface ProductSizeInsertInput {
+  id: string;
+  productId: string;
+  label: string;
+  position: number;
+  createdAt: Date;
+}
+
 interface ProductSizeGuideInput {
   productId: string;
   title: string;
@@ -116,6 +134,8 @@ export interface PromotionFoundation {
   createProduct: (values: Record<string, unknown>) => Promise<ProductIdentity>;
   updateProduct: (productId: string, values: Record<string, unknown>) => Promise<void>;
   insertProductImage: (values: ProductImageInsertInput) => Promise<void>;
+  insertProductSize: (values: ProductSizeInsertInput) => Promise<void>;
+  insertProductVariant: (values: ProductVariantInsertInput) => Promise<void>;
   upsertProductSizeGuide: (values: ProductSizeGuideInput) => Promise<void>;
   markImportItemPromoted: (input: { importItemId: string; promotedAt: Date }) => Promise<void>;
   markImportItemMediaFailed: (input: { importItemId: string; failedAt: Date; reason: string }) => Promise<void>;
@@ -146,6 +166,52 @@ export interface BulkPromotionResult {
 
 const IMMUTABLE_CACHE_CONTROL = "public, max-age=31536000, immutable";
 const REQUIRED_CATALOG_VARIANTS: readonly CatalogImageVariantName[] = ["thumb", "cart-thumb", "card", "detail", "lightbox"];
+const DEFAULT_IMPORTED_CATEGORY_NAME = "Importados Yupoo";
+const IMPORTED_CATEGORY_ALIAS_MAP: Readonly<Record<string, string>> = {
+  buzo: "Hoodies",
+  buzos: "Hoodies",
+  hoodie: "Hoodies",
+  hoodies: "Hoodies",
+  sweatshirt: "Hoodies",
+  sweatshirts: "Hoodies",
+  remera: "Remeras",
+  remeras: "Remeras",
+  tee: "Remeras",
+  tees: "Remeras",
+  "t-shirt": "Remeras",
+  "t-shirts": "Remeras",
+  camiseta: "Remeras",
+  camisetas: "Remeras",
+  campera: "Camperas",
+  camperas: "Camperas",
+  jacket: "Camperas",
+  jackets: "Camperas",
+  coat: "Camperas",
+  coats: "Camperas",
+  windbreaker: "Camperas",
+  pantalon: "Pantalones",
+  pantalones: "Pantalones",
+  pants: "Pantalones",
+  jogger: "Pantalones",
+  joggers: "Pantalones",
+  trouser: "Pantalones",
+  trousers: "Pantalones",
+  short: "Shorts",
+  shorts: "Shorts",
+  gorro: "Gorros",
+  gorros: "Gorros",
+  cap: "Gorros",
+  caps: "Gorros",
+  hat: "Gorros",
+  hats: "Gorros",
+  beanie: "Gorros",
+  camisa: "Camisas",
+  camisas: "Camisas",
+  shirt: "Camisas",
+  shirts: "Camisas",
+  polo: "Polos",
+  polos: "Polos",
+};
 
 function resolveImageExtension(sourceUrl: string, contentType?: string) {
   if (contentType?.includes("png")) return ".png";
@@ -200,6 +266,136 @@ function readStringFallback(productData: Record<string, unknown>, keys: readonly
   return null;
 }
 
+function normalizeCategoryAliasKey(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .trim()
+    .toLowerCase();
+}
+
+function resolveImportedCategoryAlias(categoryName: string) {
+  return IMPORTED_CATEGORY_ALIAS_MAP[normalizeCategoryAliasKey(categoryName)] ?? null;
+}
+
+function normalizeVariantLabel(value: string) {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function normalizeVariantDedupKey(value: string) {
+  return normalizeVariantLabel(value)
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .toLocaleLowerCase();
+}
+
+function normalizeSizeLabel(value: string) {
+  const normalized = value.replace(/\s+/g, " ").trim().toUpperCase();
+  if (!normalized) {
+    return "";
+  }
+
+  if (normalized === "XXL") return "2XL";
+  if (normalized === "XXXL") return "3XL";
+  if (normalized === "XXXXL") return "4XL";
+
+  return normalized;
+}
+
+function normalizeSizeDedupKey(value: string) {
+  return normalizeSizeLabel(value)
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .toLocaleLowerCase();
+}
+
+function extractProductSizeLabels(productData: Record<string, unknown>) {
+  const raw = productData.sizes;
+  const sourceValues = Array.isArray(raw)
+    ? raw
+    : typeof raw === "string"
+      ? raw.split(/\r?\n|,/)
+      : [];
+
+  const labels: string[] = [];
+  const seen = new Set<string>();
+
+  for (const entry of sourceValues) {
+    if (typeof entry !== "string") {
+      continue;
+    }
+
+    const normalized = normalizeSizeLabel(entry);
+    if (!normalized) {
+      continue;
+    }
+
+    const key = normalizeSizeDedupKey(normalized);
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    labels.push(normalized);
+  }
+
+  return labels;
+}
+
+function extractProductVariantLabels(productData: Record<string, unknown>) {
+  const raw = productData.variants;
+  const sourceValues = Array.isArray(raw)
+    ? raw
+    : typeof raw === "string"
+      ? raw.split(/\r?\n|,/)
+      : [];
+
+  const labels: string[] = [];
+  const seen = new Set<string>();
+
+  for (const entry of sourceValues) {
+    if (typeof entry !== "string") {
+      continue;
+    }
+
+    const normalized = normalizeVariantLabel(entry);
+    if (!normalized) {
+      continue;
+    }
+
+    const key = normalizeVariantDedupKey(normalized);
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    labels.push(normalized);
+  }
+
+  return labels;
+}
+
+function buildPromotionCategoryCandidates(categoryName: string | null) {
+  const candidates: string[] = [];
+  const pushCandidate = (value: string | null) => {
+    const normalized = asTrimmedString(value);
+    if (!normalized) {
+      return;
+    }
+
+    if (!candidates.some((entry) => entry.toLocaleLowerCase() === normalized.toLocaleLowerCase())) {
+      candidates.push(normalized);
+    }
+  };
+
+  pushCandidate(categoryName);
+  if (categoryName) {
+    pushCandidate(resolveImportedCategoryAlias(categoryName));
+  }
+  pushCandidate(DEFAULT_IMPORTED_CATEGORY_NAME);
+  return candidates;
+}
+
 function readPromotionConsumedAt(productData: Record<string, unknown> | null) {
   if (!productData) {
     return null;
@@ -241,12 +437,20 @@ async function resolveCategoryId(context: PromotionMetadataContext, foundation: 
     return direct;
   }
 
-  const categoryName = readStringFallback(context.productData, ["categoryName", "category"]);
-  if (!categoryName || !foundation.findCategoryIdByName) {
+  if (!foundation.findCategoryIdByName) {
     return null;
   }
 
-  return foundation.findCategoryIdByName(categoryName);
+  const categoryName = readStringFallback(context.productData, ["categoryName", "category"]);
+  const candidates = buildPromotionCategoryCandidates(categoryName);
+  for (const candidate of candidates) {
+    const categoryId = await foundation.findCategoryIdByName(candidate);
+    if (categoryId) {
+      return categoryId;
+    }
+  }
+
+  return null;
 }
 
 async function parsePromotionProductInput(
@@ -371,6 +575,44 @@ export async function createProductImages(
 ) {
   for (const row of rows) {
     await foundation.insertProductImage(row);
+  }
+}
+
+export async function createProductVariants(
+  foundation: PromotionFoundation,
+  input: {
+    productId: string;
+    labels: readonly string[];
+    now: Date;
+  },
+) {
+  for (const [index, label] of input.labels.entries()) {
+    await foundation.insertProductVariant({
+      id: foundation.idFactory("variant"),
+      productId: input.productId,
+      label,
+      position: index,
+      createdAt: input.now,
+    });
+  }
+}
+
+export async function createProductSizes(
+  foundation: PromotionFoundation,
+  input: {
+    productId: string;
+    labels: readonly string[];
+    now: Date;
+  },
+) {
+  for (const [index, label] of input.labels.entries()) {
+    await foundation.insertProductSize({
+      id: foundation.idFactory("size"),
+      productId: input.productId,
+      label,
+      position: index,
+      createdAt: input.now,
+    });
   }
 }
 
@@ -600,6 +842,20 @@ export async function promoteImportItem(
     now,
   });
 
+  const sizeLabels = extractProductSizeLabels(importItem.productData ?? {});
+  await createProductSizes(foundation, {
+    productId: product.id,
+    labels: sizeLabels,
+    now,
+  });
+
+  const variantLabels = extractProductVariantLabels(importItem.productData ?? {});
+  await createProductVariants(foundation, {
+    productId: product.id,
+    labels: variantLabels,
+    now,
+  });
+
   await foundation.markImportItemPromoted({
     importItemId: input.importItemId,
     promotedAt: now,
@@ -691,6 +947,12 @@ export function createPromotionFoundation(overrides: Partial<PromotionFoundation
     },
     async insertProductImage() {
       throw new Error("insertProductImage no configurado.");
+    },
+    async insertProductSize() {
+      throw new Error("insertProductSize no configurado.");
+    },
+    async insertProductVariant() {
+      throw new Error("insertProductVariant no configurado.");
     },
     async upsertProductSizeGuide() {
       throw new Error("upsertProductSizeGuide no configurado.");
@@ -830,6 +1092,12 @@ export function createPromotionFoundationFromDb(options: {
     },
     insertProductImage: async (values) => {
       await options.db.insert(productImages).values(values);
+    },
+    insertProductSize: async (values) => {
+      await options.db.insert(productSizes).values(values);
+    },
+    insertProductVariant: async (values) => {
+      await options.db.insert(productVariants).values(values);
     },
     upsertProductSizeGuide: async (values) => {
       const existing = await options.db.query.productSizeGuides.findFirst({

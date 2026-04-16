@@ -5,7 +5,7 @@
 We will drastically simplify the ingestion pipeline by deferring all media processing until the operator actually approves a product. 
 During the initial scraping/ingestion phase, we will completely eliminate R2 uploads and variant generation. The `import_images` staging table will store both the original Yupoo source URLs and their real preview URLs (extracted during scraping, instead of blindly guessing `*_small.jpg`), and the `/admin/imports` curation UI will render these preview URLs directly via proxy to save bandwidth.
 
-Furthermore, products that lack a price will be dropped immediately before reaching the staging area to prevent unpriceable junk from cluttering the queue. 
+Furthermore, products that lack a price will be dropped immediately before reaching the staging area to prevent unpriceable junk from cluttering the queue. Before processing any Yupoo source URL, the pipeline will canonicalize it to form a stable Yupoo identity (stripping tracking or display query parameters and hashes). It will then skip the item entirely if this identity already exists as a catalog product or an active staged import.
 
 After an operator finishes curating and clicks "Promote", the promotion pipeline will download only the active, non-rejected original images, upload them to R2, and generate the required owned variants (`thumb`, `cart-thumb`, `card`, `detail`, `lightbox`, `admin-preview`) exactly once. 
 
@@ -22,6 +22,11 @@ We will also introduce a safe "Clear All Imports" action for operators. Since st
 **Choice**: Immediately drop products missing a price before inserting into `import_items`.
 **Alternatives considered**: Stage them and flag them with an error in the curation UI.
 **Rationale**: Products without prices cannot be sold. Dropping them early keeps the curation queue focused on actionable items.
+
+### Decision: Duplicate Avoidance via Stable Yupoo Identity
+**Choice**: Canonicalize the `sourceUrl` during ingestion to check against `products.sourceUrl` and `importJobs.sourceReference`, skipping ingestion if a match is found.
+**Alternatives considered**: Allowing duplicates in staging and flagging them in the UI; or attempting to merge updates immediately.
+**Rationale**: Silently skipping duplicates saves DB/processing overhead and prevents operators from wasting time curating already-imported items. We defer the complexity of a "modified item" feature, focusing strictly on skip-existing behavior for now.
 
 ### Decision: Minimum Image Requirement
 **Choice**: Require at least 2 active (useful) images for promotion eligibility.
@@ -45,8 +50,10 @@ We will also introduce a safe "Clear All Imports" action for operators. Since st
 
 ## Data Flow
 
-    [Ingestion Service] ─── (Scrape Yupoo: Extract BOTH original & preview URLs)
+    [Ingestion Service] ─── (Canonicalize Yupoo source URL)
            │
+           ├─▶ (Already exists in catalog/staging? Skip product)
+           ├─▶ (Scrape Yupoo: Extract BOTH original & preview URLs)
            ├─▶ (Missing price? Drop product)
            ├─▶ (Apply heuristics/dedupe, drop junk images)
            │
@@ -68,8 +75,8 @@ We will also introduce a safe "Clear All Imports" action for operators. Since st
 | File | Action | Description |
 |------|--------|-------------|
 | `lib/db/schema.ts` | Modify | Add `previewUrl` to `import_images` table schema. |
-| `lib/yupoo-core.ts` | Modify | Update `extractYupooImages` to return an object with both `url` (original) and `previewUrl` instead of just an array of strings. |
-| `lib/imports/ingestion.ts` | Modify | Update ingestion to persist the extracted `previewUrl`. Add check to drop products missing a price. |
+| `lib/yupoo-core.ts` | Modify | Update `extractYupooImages` to return `previewUrl`. Add `canonicalizeYupooSourceUrl` function for stable identity. |
+| `lib/imports/ingestion.ts` | Modify | Check existing `products` and `importJobs` early using canonical identity; return `already-exists` skip reason. Persist `previewUrl`. Add check for missing price. |
 | `lib/imports/promotion.ts` | Modify | Download source Yupoo image, upload `original` to R2, generate all variants. Enforce 2-image minimum. |
 | `components/admin/imports-review-client.tsx` | Modify | Add single-item promote button and "Clear All Imports" button. Add current-position indicator to carousel. Ensure queue-state stability when last image is rejected (index fallback). |
 | `app/api/admin/imports/proxy/route.ts` | Modify | Remove regex path mutation; proxy the stored `previewUrl` directly. |
@@ -89,13 +96,19 @@ export interface ImportItemMetadata {
   brand?: string;
   activeCount: number; // Must be >= 2 for promotion
 }
+
+// Added to existing interfaces
+export interface YupooIngestionResult {
+  // ... existing fields ...
+  skipReason?: "missing-price" | "insufficient-useful-images" | "already-exists";
+}
 ```
 
 ## Testing Strategy
 
 | Layer | What to Test | Approach |
 |-------|-------------|----------|
-| Unit | Ingestion | Verify missing-price products are discarded before DB insert. Verify `previewUrl` is stored. |
+| Unit | Ingestion | Verify already-existing products (catalog/staging) are skipped. Verify missing-price products are discarded before DB insert. Verify `previewUrl` is stored. |
 | Unit | Promotion | Verify promotion downloads source, uploads to R2, generates variants, and enforces 2-image minimum. |
 | E2E | Curation UI | Verify carousel handles last-image rejection without crashing and renders single promote action. Verify "Clear All" correctly purges the queue. |
 | Integration | Admin API | Verify `/api/admin/imports/clear` safely removes staging records. |

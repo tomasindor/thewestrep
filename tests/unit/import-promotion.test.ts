@@ -16,6 +16,7 @@ function createPromotionFixture() {
     createProduct: [] as Array<Record<string, unknown>>,
     updateProduct: [] as Array<{ productId: string; values: Record<string, unknown> }>,
     insertProductImage: [] as unknown[],
+    insertProductSize: [] as unknown[],
     upsertProductSizeGuide: [] as unknown[],
     markImportItemPromoted: [] as Array<{ importItemId: string; promotedAt: Date }>,
     markImportItemMediaFailed: [] as Array<{ importItemId: string; reason: string; failedAt: Date }>,
@@ -104,6 +105,9 @@ function createPromotionFixture() {
     },
     insertProductImage: async (values) => {
       calls.insertProductImage.push(values);
+    },
+    insertProductSize: async (values) => {
+      calls.insertProductSize.push(values);
     },
     upsertProductSizeGuide: async (values) => {
       calls.upsertProductSizeGuide.push(values);
@@ -301,6 +305,118 @@ test("promoteImportItem validates required metadata before any R2 upload or vari
   assert.equal(fixture.calls.markImportItemMediaFailed.length, 0);
 });
 
+test("promoteImportItem creates normalized deduplicated product variants from staged productData variants", async () => {
+  const fixture = createPromotionFixture();
+  const insertedVariantLabels: string[] = [];
+
+  fixture.service.loadImportItemById = async (importItemId) => ({
+    id: importItemId,
+    status: "approved",
+    price: 89000,
+    productData: {
+      name: "Remera World Tour",
+      slug: "remera-world-tour",
+      brandId: "brand-1",
+      categoryId: "category-1",
+      type: "encargue",
+      priceArs: 89000,
+      variants: [" Negro ", "negro", " Azul  ", "", "azul", " Blanco"],
+    },
+  });
+
+  fixture.service.insertProductVariant = async (values) => {
+    insertedVariantLabels.push(values.label);
+  };
+
+  await promoteImportItem({ importItemId: "item-variants" }, fixture.service);
+
+  assert.deepEqual(insertedVariantLabels, ["Negro", "Azul", "Blanco"]);
+});
+
+test("promoteImportItem skips product variant creation when staged productData has no variants", async () => {
+  const fixture = createPromotionFixture();
+  const insertedVariantLabels: string[] = [];
+
+  fixture.service.loadImportItemById = async (importItemId) => ({
+    id: importItemId,
+    status: "approved",
+    price: 89000,
+    productData: {
+      name: "Remera World Tour",
+      slug: "remera-world-tour",
+      brandId: "brand-1",
+      categoryId: "category-1",
+      type: "encargue",
+      priceArs: 89000,
+      variants: [],
+    },
+  });
+
+  fixture.service.insertProductVariant = async (values) => {
+    insertedVariantLabels.push(values.label);
+  };
+
+  await promoteImportItem({ importItemId: "item-no-variants" }, fixture.service);
+
+  assert.deepEqual(insertedVariantLabels, []);
+});
+
+test("promoteImportItem creates normalized deduplicated product sizes from staged productData sizes", async () => {
+  const fixture = createPromotionFixture();
+  const insertedSizeLabels: string[] = [];
+
+  fixture.service.loadImportItemById = async (importItemId) => ({
+    id: importItemId,
+    status: "approved",
+    price: 89000,
+    productData: {
+      name: "Remera World Tour",
+      slug: "remera-world-tour",
+      brandId: "brand-1",
+      categoryId: "category-1",
+      type: "encargue",
+      priceArs: 89000,
+      sizes: [" m ", "M", " xxl ", "2XL", "", " 42 ", "xxxl", "3xl", "42"],
+    },
+  });
+
+  fixture.service.insertProductSize = async (values) => {
+    insertedSizeLabels.push(values.label);
+  };
+
+  await promoteImportItem({ importItemId: "item-sizes" }, fixture.service);
+
+  assert.deepEqual(insertedSizeLabels, ["M", "2XL", "42", "3XL"]);
+});
+
+test("promoteImportItem skips product size creation when staged productData has no sizes", async () => {
+  const fixture = createPromotionFixture();
+  const insertedSizeLabels: string[] = [];
+
+  fixture.service.loadImportItemById = async (importItemId) => ({
+    id: importItemId,
+    status: "approved",
+    price: 89000,
+    productData: {
+      name: "Remera World Tour",
+      slug: "remera-world-tour",
+      brandId: "brand-1",
+      categoryId: "category-1",
+      type: "encargue",
+      priceArs: 89000,
+      sizes: [],
+    },
+  });
+
+  fixture.service.insertProductSize = async (values) => {
+    insertedSizeLabels.push(values.label);
+  };
+
+  await promoteImportItem({ importItemId: "item-no-sizes" }, fixture.service);
+
+  assert.deepEqual(insertedSizeLabels, []);
+});
+
 test("promoteEligibleImportItems promotes in bulk and reports blocked products", async () => {
   const fixture = createPromotionFixture();
   const productData = {
@@ -461,4 +577,104 @@ test("promoteEligibleImportItems supports name-based metadata flow in bulk promo
   assert.equal(result.promotedCount, 1);
   assert.deepEqual(result.promotedItemIds, ["item-bulk-name-based"]);
   assert.equal(result.blocked.length, 0);
+});
+
+test("promoteImportItem normalizes aliased category names before resolving DB category", async () => {
+  const fixture = createPromotionFixture();
+  fixture.service.loadImportItemById = async (importItemId) => ({
+    id: importItemId,
+    status: "approved",
+    price: 99990,
+    productData: {
+      productName: "Buzo clásico",
+      brandName: "Adidas",
+      categoryName: "Buzos",
+      priceArs: 99990,
+    },
+  });
+
+  fixture.service.findBrandIdByName = async (name) => (name === "Adidas" ? "brand-adidas" : null);
+  const categoryLookups: string[] = [];
+  fixture.service.findCategoryIdByName = async (name) => {
+    categoryLookups.push(name);
+    return name === "Hoodies" ? "category-hoodies" : null;
+  };
+
+  const result = await promoteImportItem({ importItemId: "item-alias-category" }, fixture.service);
+
+  assert.equal(result.importItemId, "item-alias-category");
+  assert.deepEqual(categoryLookups, ["Buzos", "Hoodies"]);
+  const created = fixture.calls.createProduct[0] as Record<string, unknown>;
+  assert.equal(created.categoryId, "category-hoodies");
+});
+
+test("promoteImportItem resolves representative aliases across imported category map", async () => {
+  const cases = [
+    { input: "hoodie", canonical: "Hoodies" },
+    { input: "camiseta", canonical: "Remeras" },
+    { input: "jacket", canonical: "Camperas" },
+    { input: "Pantalón", canonical: "Pantalones" },
+    { input: "short", canonical: "Shorts" },
+    { input: "beanie", canonical: "Gorros" },
+    { input: "shirts", canonical: "Camisas" },
+    { input: "polo", canonical: "Polos" },
+  ] as const;
+
+  for (const entry of cases) {
+    const fixture = createPromotionFixture();
+    fixture.service.loadImportItemById = async (importItemId) => ({
+      id: importItemId,
+      status: "approved",
+      price: 99990,
+      productData: {
+        productName: `Producto ${entry.input}`,
+        brandName: "Adidas",
+        categoryName: entry.input,
+        priceArs: 99990,
+      },
+    });
+
+    fixture.service.findBrandIdByName = async (name) => (name === "Adidas" ? "brand-adidas" : null);
+    const categoryLookups: string[] = [];
+    fixture.service.findCategoryIdByName = async (name) => {
+      categoryLookups.push(name);
+      return name === entry.canonical ? `category-${entry.canonical.toLowerCase()}` : null;
+    };
+
+    const result = await promoteImportItem({ importItemId: `item-alias-${entry.input}` }, fixture.service);
+
+    assert.equal(result.importItemId, `item-alias-${entry.input}`);
+    assert.deepEqual(categoryLookups, [entry.input, entry.canonical]);
+    const created = fixture.calls.createProduct[0] as Record<string, unknown>;
+    assert.equal(created.categoryId, `category-${entry.canonical.toLowerCase()}`);
+  }
+});
+
+test("promoteImportItem falls back to Importados Yupoo category when no exact or aliased match exists", async () => {
+  const fixture = createPromotionFixture();
+  fixture.service.loadImportItemById = async (importItemId) => ({
+    id: importItemId,
+    status: "approved",
+    price: 124000,
+    productData: {
+      productName: "Producto importado",
+      brandName: "Nike",
+      categoryName: "Categoría desconocida",
+      priceArs: 124000,
+    },
+  });
+
+  fixture.service.findBrandIdByName = async (name) => (name === "Nike" ? "brand-nike" : null);
+  const categoryLookups: string[] = [];
+  fixture.service.findCategoryIdByName = async (name) => {
+    categoryLookups.push(name);
+    return name === "Importados Yupoo" ? "category-importados-yupoo" : null;
+  };
+
+  const result = await promoteImportItem({ importItemId: "item-fallback-category" }, fixture.service);
+
+  assert.equal(result.importItemId, "item-fallback-category");
+  assert.deepEqual(categoryLookups, ["Categoría desconocida", "Importados Yupoo"]);
+  const created = fixture.calls.createProduct[0] as Record<string, unknown>;
+  assert.equal(created.categoryId, "category-importados-yupoo");
 });
