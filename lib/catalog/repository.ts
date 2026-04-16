@@ -58,8 +58,6 @@ const DEFAULT_PRODUCT_NOTE: Record<ProductAvailability, string> = {
   encargue: "",
 };
 
-const MIN_HOMEPAGE_STOCK_PRODUCTS = 5;
-
 function mapFallbackBrands() {
   return catalogInventorySource.brands.map((brand) => ({
     id: brand.id,
@@ -147,50 +145,6 @@ async function resolvePreferredBrandLogos(brands: readonly Brand[]) {
       return preferredImage === brand.image ? brand : { ...brand, image: preferredImage };
     }),
   );
-}
-
-function mergeEntitiesById<T extends { id: string }>(primary: readonly T[], fallback: readonly T[]) {
-  const entitiesById = new Map(primary.map((entity) => [entity.id, entity]));
-
-  for (const entity of fallback) {
-    if (!entitiesById.has(entity.id)) {
-      entitiesById.set(entity.id, entity);
-    }
-  }
-
-  return Array.from(entitiesById.values());
-}
-
-function countPublishedStockProducts(products: readonly Product[]) {
-  return products.filter((product) => product.availability === "stock" && product.state === "published").length;
-}
-
-function supplementStockProducts(dataset: {
-  brands: readonly Brand[];
-  categories: readonly Category[];
-  products: readonly Product[];
-}) {
-  if (countPublishedStockProducts(dataset.products) >= MIN_HOMEPAGE_STOCK_PRODUCTS) {
-    return {
-      brands: [...dataset.brands],
-      categories: [...dataset.categories],
-      products: [...dataset.products],
-    };
-  }
-
-  const existingProductIds = new Set(dataset.products.map((product) => product.id));
-  const supplementalStockProducts = fallbackData.products.filter(
-    (product) => product.availability === "stock" && !existingProductIds.has(product.id),
-  );
-
-  const missingProductsCount = MIN_HOMEPAGE_STOCK_PRODUCTS - countPublishedStockProducts(dataset.products);
-  const nextProducts = [...dataset.products, ...supplementalStockProducts.slice(0, missingProductsCount)];
-
-  return {
-    brands: mergeEntitiesById(dataset.brands, fallbackData.brands),
-    categories: mergeEntitiesById(dataset.categories, fallbackData.categories),
-    products: nextProducts,
-  };
 }
 
 function parseManagedImageProvider(value: string | null | undefined): ManagedImageProvider | null {
@@ -700,11 +654,9 @@ export async function getCatalogDataset() {
     };
   }
 
-  const supplementedCatalog = supplementStockProducts(databaseCatalog);
-
   return {
-    ...supplementedCatalog,
-    brands: await resolvePreferredBrandLogos(supplementedCatalog.brands),
+    ...databaseCatalog,
+    brands: await resolvePreferredBrandLogos(databaseCatalog.brands),
   };
 }
 

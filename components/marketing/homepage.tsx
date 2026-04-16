@@ -241,41 +241,58 @@ export async function HomePage() {
           />
 
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            {categoryCards.map((item) => (
-              <Link
-                key={item.id}
-                href={item.href}
-                className="group overflow-hidden rounded-[1.75rem] border border-white/10 bg-white/[0.03] transition duration-300 hover:-translate-y-1 hover:border-[rgba(210,138,163,0.42)] hover:shadow-[0_24px_60px_rgba(0,0,0,0.22)]"
-              >
-                <div className="relative aspect-[4/5] overflow-hidden border-b border-white/10">
-                  <SmartImage
-                    src={item.image}
-                    alt={item.alt}
-                    fill
-                    className="object-cover transition duration-500 group-hover:scale-[1.03]"
-                    sizes="(max-width: 1280px) 50vw, 25vw"
-                  />
-                </div>
-                <div className="space-y-3 p-5">
-                  <div className="flex flex-wrap gap-2 text-[11px] font-medium tracking-[0.24em] uppercase">
-                    <span className="rounded-full border border-white/10 bg-white/6 px-3 py-1 text-white/75">
-                      {item.availabilityLabel}
-                    </span>
-                    <span className="rounded-full border border-[rgba(210,138,163,0.28)] bg-[rgba(210,138,163,0.12)] px-3 py-1 text-[#f1d2dc]/80">
-                      {item.productCount} producto{item.productCount === 1 ? "" : "s"}
-                    </span>
+            {categoryCards.length > 0 ? (
+              categoryCards.map((item) => (
+                <Link
+                  key={item.id}
+                  href={item.href}
+                  className="group overflow-hidden rounded-[1.75rem] border border-white/10 bg-white/[0.03] transition duration-300 hover:-translate-y-1 hover:border-[rgba(210,138,163,0.42)] hover:shadow-[0_24px_60px_rgba(0,0,0,0.22)]"
+                >
+                  <div className="relative aspect-[4/5] overflow-hidden border-b border-white/10">
+                    <SmartImage
+                      src={item.image}
+                      alt={item.alt}
+                      fill
+                      className="object-cover transition duration-500 group-hover:scale-[1.03]"
+                      sizes="(max-width: 1280px) 50vw, 25vw"
+                    />
                   </div>
-                  <h3 className="text-lg font-semibold text-white">{item.name}</h3>
-                  <p className="text-sm leading-6 text-slate-300">{item.description}</p>
-                  <div className="flex items-center justify-between gap-3 pt-1 text-sm font-medium text-[#f4d7e0]">
-                    <span>Ver categoría</span>
-                    <span aria-hidden="true" className="text-lg transition duration-300 group-hover:translate-x-1">
-                      →
-                    </span>
+                  <div className="space-y-3 p-5">
+                    <div className="flex flex-wrap gap-2 text-[11px] font-medium tracking-[0.24em] uppercase">
+                      <span className="rounded-full border border-white/10 bg-white/6 px-3 py-1 text-white/75">
+                        {item.availabilityLabel}
+                      </span>
+                      <span className="rounded-full border border-[rgba(210,138,163,0.28)] bg-[rgba(210,138,163,0.12)] px-3 py-1 text-[#f1d2dc]/80">
+                        {item.productCount} producto{item.productCount === 1 ? "" : "s"}
+                      </span>
+                    </div>
+                    <h3 className="text-lg font-semibold text-white">{item.name}</h3>
+                    <p className="text-sm leading-6 text-slate-300">{item.description}</p>
+                    <div className="flex items-center justify-between gap-3 pt-1 text-sm font-medium text-[#f4d7e0]">
+                      <span>Ver categoría</span>
+                      <span aria-hidden="true" className="text-lg transition duration-300 group-hover:translate-x-1">
+                        →
+                      </span>
+                    </div>
+                  </div>
+                </Link>
+              ))
+            ) : (
+              <div className="sm:col-span-2 xl:col-span-4">
+                <div className="rounded-[1.75rem] border border-dashed border-white/15 bg-white/[0.03] p-6 sm:p-8">
+                  <p className="text-xs font-medium tracking-[0.24em] text-[#f1d2dc]/75 uppercase">Catálogo en preparación</p>
+                  <h3 className="mt-3 text-2xl font-semibold text-white sm:text-3xl">Todavía no hay categorías con encargues publicados.</h3>
+                  <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300 sm:text-base">
+                    Cuando publiquemos productos de encargue vas a poder entrar desde acá con el filtro aplicado.
+                  </p>
+                  <div className="mt-5">
+                    <Link href="/encargue" className={ghostCtaClassName}>
+                      Ir al catálogo de encargues
+                    </Link>
                   </div>
                 </div>
-              </Link>
-            ))}
+              </div>
+            )}
           </div>
         </Container>
       </section>
@@ -294,7 +311,22 @@ export async function HomePage() {
             </Link>
           </div>
 
-          <ProductGrid products={featuredStockProducts} cardVariant="home" contextAvailability="stock" />
+          {featuredStockProducts.length > 0 ? (
+            <ProductGrid products={featuredStockProducts} cardVariant="home" contextAvailability="stock" />
+          ) : (
+            <div className="rounded-[1.75rem] border border-dashed border-white/15 bg-white/[0.03] p-6 sm:p-8">
+              <p className="text-xs font-medium tracking-[0.24em] text-[#f1d2dc]/75 uppercase">Stock en pausa</p>
+              <h3 className="mt-3 text-2xl font-semibold text-white sm:text-3xl">No hay productos de stock publicados ahora.</h3>
+              <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300 sm:text-base">
+                El storefront sigue operativo: podés entrar al catálogo para revisar novedades apenas se publiquen.
+              </p>
+              <div className="mt-5">
+                <Link href="/stock" className={ghostCtaClassName}>
+                  Abrir catálogo de stock
+                </Link>
+              </div>
+            </div>
+          )}
         </Container>
       </section>
 

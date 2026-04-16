@@ -29,7 +29,7 @@ function createEditableProduct(overrides: Partial<EditableInventoryProduct>): Ed
 test("preserves editable leadTime and stockNote for matching encargue slugs", () => {
   const commercialAvailabilityBySlug = buildEditableCommercialAvailabilityBySlug([
     createEditableProduct({
-      slug: "bape-college-hoodie",
+      slug: "sample-encargue-product",
       availabilitySummary: "Arribo estimado 40-60 días",
       leadTime: "40-60 días",
       stockNote: "Confirmación de talle y color antes de cerrar.",
@@ -41,7 +41,7 @@ test("preserves editable leadTime and stockNote for matching encargue slugs", ()
   };
 
   const availabilityInfo = enrichCommercialAvailabilityInfo(
-    { slug: "bape-college-hoodie", availability: "encargue" },
+    { slug: "sample-encargue-product", availability: "encargue" },
     fallbackAvailabilityInfo,
     commercialAvailabilityBySlug,
   );
