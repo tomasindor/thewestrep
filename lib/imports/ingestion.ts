@@ -2,8 +2,8 @@ import { eq } from "drizzle-orm";
 
 import { isLikelySizeGuideImageUrl, reorderLikelySizeGuideImageUrls } from "@/lib/catalog/size-guides";
 import { importImages, importItems, importJobs } from "@/lib/db/schema";
-import { classifyImportImageCandidate } from "@/lib/imports/heuristics";
-import { validateImportPrice } from "@/lib/imports/price-validator";
+import { classifyImportImageCandidate, inferComboMetadata } from "@/lib/imports/heuristics";
+import { resolveImportPrices } from "@/lib/imports/price-validator";
 import { createId } from "@/lib/utils";
 import {
   canonicalizeYupooImageCandidates,
@@ -63,6 +63,7 @@ export interface IngestionDependencies {
 export interface YupooIngestionResult {
   importJobId: string | null;
   importItemId: string | null;
+  importItemIds?: string[];
   importedImages: number;
   skippedDuplicateImages: number;
   skippedHeuristicImages?: number;
@@ -354,6 +355,132 @@ function normalizeCandidateImage(input: string | { url: string; previewUrl?: str
   };
 }
 
+function readImportDisplayName(productData: Record<string, unknown> | null | undefined) {
+  const candidates = [productData?.finalName, productData?.productName, productData?.name, productData?.rawName];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim().length > 0) {
+      return candidate.trim();
+    }
+  }
+
+  return "";
+}
+
+function readImportAlbumTitle(input: YupooIngestionInput) {
+  const sourceReference = typeof input.sourceReference === "string" ? input.sourceReference.trim() : "";
+
+  if (sourceReference) {
+    return sourceReference;
+  }
+
+  return readImportDisplayName(input.productData ?? null);
+}
+
+function inferTopGarmentKind(value: string) {
+  const normalized = value.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+
+  if (/(campera|camperas|jacket|jackets|coat|coats|parka|parkas|windbreaker|anorak|chaqueta|chaquetas)/.test(normalized)) {
+    return { label: "Campera", categoryName: "Camperas" };
+  }
+
+  return { label: "Buzo", categoryName: "Buzos" };
+}
+
+function buildSplitProductName(label: string, fallbackName: string, brandName: string | null) {
+  const cleaned = fallbackName
+    .replace(/[¥￥]\s*\d+(?:[.,]\d+)?/g, " ")
+    .replace(/\b(?:set|combo|conjunto|tracksuit|track suit)\b/gi, " ")
+    .replace(/\b(?:campera|camperas|jacket|jackets|coat|coats|parka|parkas|buzo|buzos|hoodie|hoodies|sweatshirt|sweatshirts|pantalon|pantalones|pants|trouser|trousers|jogger|joggers)\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const descriptor = cleaned || brandName || "Importado";
+  return `${label} ${descriptor}`.replace(/\s+/g, " ").trim();
+}
+
+function shouldSplitBulkSet(input: YupooIngestionInput, resolvedPrices: { prices: number[] }) {
+  if (input.source !== "bulk") {
+    return false;
+  }
+
+  if (resolvedPrices.prices.length !== 2) {
+    return false;
+  }
+
+  return input.productData?.importerDetectedTwoTitlePrices === true
+    && input.productData?.detectedPricesSource === "title";
+}
+
+function buildImportItemSpecs(input: YupooIngestionInput, resolvedPrices: { prices: number[]; primaryPrice: number }) {
+  const baseProductData = { ...(input.productData ?? {}) };
+  const albumTitle = readImportAlbumTitle(input);
+  const displayName = readImportDisplayName(baseProductData);
+  const brandName = typeof baseProductData.brandName === "string" && baseProductData.brandName.trim().length > 0
+    ? baseProductData.brandName.trim()
+    : typeof baseProductData.brand === "string" && baseProductData.brand.trim().length > 0
+      ? baseProductData.brand.trim()
+      : null;
+  const comboMetadata = inferComboMetadata({
+    albumTitle,
+    sourceUrl: input.sourceUrl,
+    productData: {
+      ...baseProductData,
+      priceArs: resolvedPrices.primaryPrice,
+    },
+    productCount: resolvedPrices.prices.length,
+    detectedPrices: resolvedPrices.prices,
+  });
+
+  if (shouldSplitBulkSet(input, resolvedPrices)) {
+    const topGarment = inferTopGarmentKind(`${albumTitle} ${displayName}`);
+    const bottomGarment = { label: "Pantalón", categoryName: "Pantalones" };
+    const comboGroup = comboMetadata.comboGroup ?? `importer-two-prices-${Date.now()}`;
+
+    return [topGarment, bottomGarment].map((garment, index) => {
+      const price = resolvedPrices.prices[index] ?? resolvedPrices.primaryPrice;
+      const productName = buildSplitProductName(garment.label, displayName || albumTitle, brandName);
+
+      return {
+        price,
+        productData: {
+          ...baseProductData,
+          productName,
+          finalName: productName,
+          categoryName: garment.categoryName,
+          finalPrice: price,
+          priceArs: price,
+          detectedPrices: resolvedPrices.prices,
+          importerSplitByTwoPrices: true,
+          importerSplitRole: index === 0 ? "top" : "bottom",
+          comboEligible: true,
+          comboGroup,
+          comboPriority: 0,
+          comboSourceKey: comboMetadata.comboSourceKey ?? "importer-two-prices",
+          comboScore: comboMetadata.comboScore,
+        },
+      };
+    });
+  }
+
+  return [{
+    price: resolvedPrices.primaryPrice,
+    productData: {
+      ...baseProductData,
+      finalPrice: resolvedPrices.primaryPrice,
+      priceArs: resolvedPrices.primaryPrice,
+      ...(comboMetadata.comboEligible
+        ? {
+          comboEligible: comboMetadata.comboEligible,
+          comboGroup: comboMetadata.comboGroup,
+          comboPriority: comboMetadata.comboPriority,
+          comboSourceKey: comboMetadata.comboSourceKey,
+        }
+        : {}),
+      comboScore: comboMetadata.comboScore,
+    },
+  }];
+}
+
 async function resolveCandidateImageUrls(input: YupooIngestionInput, dependencies: IngestionDependencies) {
   if (input.imageUrls?.length) {
     return input.imageUrls
@@ -379,10 +506,9 @@ export async function ingestYupooSource(input: YupooIngestionInput, dependencies
   const now = dependencies.now?.() ?? new Date();
   const idFactory = dependencies.idFactory ?? createId;
   const jobId = idFactory("import-job");
-  const itemId = idFactory("import-item");
 
-  const priceValidation = validateImportPrice(input.productData ?? null);
-  if (!priceValidation.valid) {
+  const resolvedPrices = resolveImportPrices(input.productData ?? null);
+  if (!resolvedPrices.valid) {
     return {
       importJobId: null,
       importItemId: null,
@@ -395,11 +521,12 @@ export async function ingestYupooSource(input: YupooIngestionInput, dependencies
     };
   }
 
-  const productDataWithPrice = {
-    ...(input.productData ?? {}),
-    finalPrice: priceValidation.price,
-    priceArs: priceValidation.price,
-  };
+  const itemSpecs = buildImportItemSpecs({ ...input, sourceUrl: sourceUrl.href }, resolvedPrices)
+    .map((spec) => ({
+      itemId: idFactory("import-item"),
+      price: spec.price,
+      productData: spec.productData,
+    }));
 
   const identity = buildYupooSourceIdentity({
     sourceUrl: sourceUrl.href,
@@ -487,51 +614,53 @@ export async function ingestYupooSource(input: YupooIngestionInput, dependencies
       updatedAt: now,
     });
 
-    await dependencies.db.insert(importItems).values({
-      id: itemId,
-      importJobId: jobId,
-      status: "approved",
-      productData: productDataWithPrice,
-      price: priceValidation.price,
-      createdAt: now,
-      updatedAt: now,
-    });
-
-    for (const [order, imageUrl] of filtered.entries()) {
-      const imageRow = {
-        sourceUrl: imageUrl,
-        previewUrl: (() => {
-          const directPreview = previewBySourceUrl.get(imageUrl);
-
-          if (directPreview) {
-            return directPreview;
-          }
-
-          try {
-            const key = getYupooCanonicalKey(imageUrl);
-            return previewByCanonicalKey.get(key) ?? imageUrl;
-          } catch {
-            return imageUrl;
-          }
-        })(),
-        order,
-        reviewState: "approved" as const,
-        isSizeGuide: isLikelySizeGuideImageUrl(imageUrl, { index: order, sourcePageUrl: sourceUrl.href }),
-      };
-
-      stagedImageRows.push(imageRow);
-
-      await dependencies.db.insert(importImages).values({
-        id: idFactory("import-image"),
-        importItemId: itemId,
-        sourceUrl: imageRow.sourceUrl,
-        previewUrl: imageRow.previewUrl,
-        order: imageRow.order,
-        reviewState: "approved",
-        isSizeGuide: imageRow.isSizeGuide,
+    for (const itemSpec of itemSpecs) {
+      await dependencies.db.insert(importItems).values({
+        id: itemSpec.itemId,
+        importJobId: jobId,
+        status: "approved",
+        productData: itemSpec.productData,
+        price: itemSpec.price,
         createdAt: now,
         updatedAt: now,
       });
+
+      for (const [order, imageUrl] of filtered.entries()) {
+        const imageRow = {
+          sourceUrl: imageUrl,
+          previewUrl: (() => {
+            const directPreview = previewBySourceUrl.get(imageUrl);
+
+            if (directPreview) {
+              return directPreview;
+            }
+
+            try {
+              const key = getYupooCanonicalKey(imageUrl);
+              return previewByCanonicalKey.get(key) ?? imageUrl;
+            } catch {
+              return imageUrl;
+            }
+          })(),
+          order,
+          reviewState: "approved" as const,
+          isSizeGuide: isLikelySizeGuideImageUrl(imageUrl, { index: order, sourcePageUrl: sourceUrl.href }),
+        };
+
+        stagedImageRows.push(imageRow);
+
+        await dependencies.db.insert(importImages).values({
+          id: idFactory("import-image"),
+          importItemId: itemSpec.itemId,
+          sourceUrl: imageRow.sourceUrl,
+          previewUrl: imageRow.previewUrl,
+          order: imageRow.order,
+          reviewState: "approved",
+          isSizeGuide: imageRow.isSizeGuide,
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
     }
 
     await dependencies.db.update(importJobs).set({ status: "completed", updatedAt: now }).where(eq(importJobs.id, jobId));
@@ -542,7 +671,8 @@ export async function ingestYupooSource(input: YupooIngestionInput, dependencies
 
   return {
     importJobId: jobId,
-    importItemId: itemId,
+    importItemId: itemSpecs[0]?.itemId ?? null,
+    importItemIds: itemSpecs.map((itemSpec) => itemSpec.itemId),
     importedImages: stagedImageRows.length,
     skippedDuplicateImages: Math.max(0, candidates.map((candidate) => candidate.url).length - ordered.length),
     skippedHeuristicImages: Math.max(0, ordered.length - filtered.length),

@@ -339,3 +339,150 @@ test("buildBulkIngestionInput maps legacy script payload into shared ingestion i
   });
   assert.deepEqual(input.imageUrls, ["https://photo.yupoo.com/demo/albums/789/original.jpg"]);
 });
+
+test("ingestYupooSource persists inferred combo metadata and comboScore in productData", async () => {
+  const fakeDb = createFakeDb();
+
+  await ingestYupooSource(
+    {
+      source: "bulk",
+      sourceUrl: "https://deateath.x.yupoo.com/albums/987?uid=1",
+      sourceReference: "Nike Winter Look 2026",
+      productData: { rawName: "Nike Winter Look 2026", brandName: "Nike", priceArs: 95000 },
+      imageUrls: [
+        "https://photo.yupoo.com/demo/albums/987/a/look-a.jpg",
+        "https://photo.yupoo.com/demo/albums/987/b/look-b.jpg",
+      ],
+    },
+    {
+      db: fakeDb.db,
+      idFactory: (prefix) => `${prefix}-combo-meta`,
+    },
+  );
+
+  const itemInsert = fakeDb.inserts.find((entry) => entry.table === importItems);
+  assert.ok(itemInsert);
+
+  const inserted = itemInsert?.values as { productData: Record<string, unknown> };
+  assert.equal(inserted.productData.comboEligible, true);
+  assert.equal(inserted.productData.comboSourceKey, "importer-album-title");
+  assert.equal(typeof inserted.productData.comboScore, "number");
+});
+
+test("ingestYupooSource creates two separate staging items when two prices are detected", async () => {
+  const fakeDb = createFakeDb();
+
+  const result = await ingestYupooSource(
+    {
+      source: "bulk",
+      sourceUrl: "https://deateath.x.yupoo.com/albums/741?uid=1",
+      sourceReference: "Album 741",
+      productData: {
+        rawName: "Album 741",
+        brandName: "Nike",
+        detectedPrices: [145000, 99000],
+        importerDetectedTwoTitlePrices: true,
+        detectedPricesSource: "title",
+      },
+      imageUrls: [
+        "https://photo.yupoo.com/demo/albums/741/a/look-a.jpg",
+        "https://photo.yupoo.com/demo/albums/741/b/look-b.jpg",
+      ],
+    },
+    {
+      db: fakeDb.db,
+      idFactory: (prefix) => `${prefix}-two-prices`,
+    },
+  );
+
+  assert.equal(result.skipped, false);
+  assert.equal(result.importItemIds?.length, 2);
+
+  const itemInserts = fakeDb.inserts.filter((entry) => entry.table === importItems);
+  assert.equal(itemInserts.length, 2);
+  const [firstItem, secondItem] = itemInserts.map((entry) => entry.values as { price: number; productData: Record<string, unknown> });
+  assert.equal(firstItem.price, 145000);
+  assert.equal(secondItem.price, 99000);
+  assert.equal(firstItem.productData.productName, "Buzo Album 741");
+  assert.equal(secondItem.productData.productName, "Pantalón Album 741");
+  assert.equal(firstItem.productData.categoryName, "Buzos");
+  assert.equal(secondItem.productData.categoryName, "Pantalones");
+  assert.equal(firstItem.productData.comboEligible, true);
+  assert.equal(secondItem.productData.comboEligible, true);
+  assert.equal(firstItem.productData.importerSplitByTwoPrices, true);
+  assert.equal(secondItem.productData.importerSplitByTwoPrices, true);
+
+  const imageInserts = fakeDb.inserts.filter((entry) => entry.table === importImages);
+  assert.equal(imageInserts.length, 4);
+  assert.equal(result.importedImages, 4);
+});
+
+test("ingestYupooSource does not split bulk imports without the explicit two-title-price marker", async () => {
+  const fakeDb = createFakeDb();
+
+  const result = await ingestYupooSource(
+    {
+      source: "bulk",
+      sourceUrl: "https://deateath.x.yupoo.com/albums/742?uid=1",
+      sourceReference: "Album 742",
+      productData: {
+        rawName: "Album 742",
+        brandName: "Nike",
+        detectedPrices: [145000, 99000],
+      },
+      imageUrls: [
+        "https://photo.yupoo.com/demo/albums/742/a/look-a.jpg",
+        "https://photo.yupoo.com/demo/albums/742/b/look-b.jpg",
+      ],
+    },
+    {
+      db: fakeDb.db,
+      idFactory: (prefix) => `${prefix}-bulk-no-marker`,
+    },
+  );
+
+  assert.equal(result.skipped, false);
+  assert.equal(result.importItemIds?.length, 1);
+
+  const itemInserts = fakeDb.inserts.filter((entry) => entry.table === importItems);
+  assert.equal(itemInserts.length, 1);
+  const createdItem = itemInserts[0]?.values as { price: number; productData: Record<string, unknown> };
+  assert.equal(createdItem.price, 145000);
+  assert.equal(createdItem.productData.importerSplitByTwoPrices, undefined);
+});
+
+test("ingestYupooSource does not split admin imports even if two prices are present", async () => {
+  const fakeDb = createFakeDb();
+
+  const result = await ingestYupooSource(
+    {
+      source: "admin",
+      sourceUrl: "https://deateath.x.yupoo.com/albums/743?uid=1",
+      sourceReference: "Album 743",
+      productData: {
+        rawName: "Album 743",
+        brandName: "Nike",
+        detectedPrices: [145000, 99000],
+        importerDetectedTwoTitlePrices: true,
+        detectedPricesSource: "title",
+      },
+      imageUrls: [
+        "https://photo.yupoo.com/demo/albums/743/a/look-a.jpg",
+        "https://photo.yupoo.com/demo/albums/743/b/look-b.jpg",
+      ],
+    },
+    {
+      db: fakeDb.db,
+      idFactory: (prefix) => `${prefix}-admin-two-prices`,
+    },
+  );
+
+  assert.equal(result.skipped, false);
+  assert.equal(result.importItemIds?.length, 1);
+
+  const itemInserts = fakeDb.inserts.filter((entry) => entry.table === importItems);
+  assert.equal(itemInserts.length, 1);
+  const createdItem = itemInserts[0]?.values as { price: number; productData: Record<string, unknown> };
+  assert.equal(createdItem.price, 145000);
+  assert.equal(createdItem.productData.importerSplitByTwoPrices, undefined);
+});

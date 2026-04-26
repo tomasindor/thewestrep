@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { validateImportPrice } from "../../../../lib/imports/price-validator";
+import { resolveImportPrices, validateImportPrice } from "../../../../lib/imports/price-validator";
 
 test("validateImportPrice accepts resolved positive price", () => {
   const result = validateImportPrice({ finalPrice: 120000, priceArs: 90000 });
@@ -24,5 +24,18 @@ test("validateImportPrice rejects missing or invalid prices with explicit skip r
   assert.equal(invalid.valid, false);
   if (!invalid.valid) {
     assert.equal(invalid.reason, "missing-price");
+  }
+});
+
+test("resolveImportPrices returns both detected prices when importer payload includes pair metadata", () => {
+  const result = resolveImportPrices({
+    finalPrice: 120000,
+    detectedPrices: [120000, "95.000"],
+  });
+
+  assert.equal(result.valid, true);
+  if (result.valid) {
+    assert.deepEqual(result.prices.slice(0, 2), [120000, 95000]);
+    assert.equal(result.primaryPrice, 120000);
   }
 });

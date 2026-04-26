@@ -33,6 +33,9 @@ export interface CurationQueueItem {
   finalName: string | null;
   finalPrice: number | null;
   brand: string | null;
+  comboScore: number | null;
+  comboEligible: boolean;
+  comboGroup: string | null;
   activeImageCount: number;
   productName: string | null;
   coverImageId: string | null;
@@ -64,10 +67,10 @@ export async function clearImportsQueueFromDb(db: {
 export async function deleteImportItemFromDb(db: {
   query: {
     importItems: {
-      findFirst(input: { where: any }): Promise<{ id: string; importJobId: string } | undefined>;
+      findFirst(...args: unknown[]): Promise<{ id: string; importJobId: string } | undefined>;
     };
   };
-  delete(table: unknown): { where(predicate: any): Promise<unknown> };
+  delete(table: unknown): { where(...args: unknown[]): Promise<unknown> };
 }, importItemId: string) {
   const item = await db.query.importItems.findFirst({
     where: eq(importItems.id, importItemId),
@@ -87,15 +90,17 @@ export interface UpdateImportItemData {
   finalName?: string;
   finalPrice?: number;
   categoryName?: string;
+  comboEligible?: boolean;
+  comboGroup?: string;
 }
 
 export async function updateImportItemFromDb(db: {
   query: {
     importItems: {
-      findFirst(input: { where: any }): Promise<{ id: string; productData: Record<string, unknown> | null; price: number | null } | undefined>;
+      findFirst(...args: unknown[]): Promise<{ id: string; productData: Record<string, unknown> | null; price: number | null } | undefined>;
     };
   };
-  update(table: unknown): { set(values: any): { where(predicate: any): Promise<unknown> } };
+  update(table: unknown): { set(values: Record<string, unknown>): { where(...args: unknown[]): Promise<unknown> } };
 }, importItemId: string, data: UpdateImportItemData) {
   const item = await db.query.importItems.findFirst({
     where: eq(importItems.id, importItemId),
@@ -105,7 +110,7 @@ export async function updateImportItemFromDb(db: {
     return { updated: false, reason: "not_found" };
   }
 
-  const updates: any = {};
+  const updates: Record<string, unknown> = {};
   const productDataUpdate: Record<string, unknown> = item.productData ?? {};
 
   if (data.finalName !== undefined) {
@@ -114,6 +119,14 @@ export async function updateImportItemFromDb(db: {
 
   if (data.categoryName !== undefined) {
     productDataUpdate.categoryName = data.categoryName;
+  }
+
+  if (data.comboEligible !== undefined) {
+    productDataUpdate.comboEligible = data.comboEligible;
+  }
+
+  if (data.comboGroup !== undefined) {
+    productDataUpdate.comboGroup = data.comboGroup;
   }
 
   if (Object.keys(productDataUpdate).length > 0) {
@@ -158,7 +171,7 @@ interface DbImportImage {
   order: number;
 }
 
-function resolveMediaStatus(item: { status: string; productData: Record<string, unknown> | null }, images: readonly DbImportImage[]): "pending" | "ready" | "failed" {
+function resolveMediaStatus(item: { status: string; productData: Record<string, unknown> | null }): "pending" | "ready" | "failed" {
   if (item.status === "media_failed") {
     return "failed";
   }
@@ -188,6 +201,22 @@ function resolveBrand(productData: Record<string, unknown> | null) {
   if (!productData) return null;
 
   const raw = productData.brand ?? productData.brandName;
+  return typeof raw === "string" && raw.trim().length > 0 ? raw.trim() : null;
+}
+
+function resolveComboScore(productData: Record<string, unknown> | null) {
+  if (!productData) return null;
+
+  const raw = productData.comboScore;
+  return typeof raw === "number" && Number.isFinite(raw) ? raw : null;
+}
+
+function resolveComboEligible(productData: Record<string, unknown> | null) {
+  return productData?.comboEligible === true;
+}
+
+function resolveComboGroup(productData: Record<string, unknown> | null) {
+  const raw = productData?.comboGroup;
   return typeof raw === "string" && raw.trim().length > 0 ? raw.trim() : null;
 }
 
@@ -244,11 +273,14 @@ export function createImportsCurationServiceFromDb(options: {
         normalizedItems.push({
           id: item.id,
           status: item.status,
-          mediaStatus: resolveMediaStatus(item, images),
+          mediaStatus: resolveMediaStatus(item),
           sourceReference: job?.sourceReference ?? null,
           finalName: resolveProductName(item.productData),
           finalPrice: resolveFinalPrice(item.productData),
           brand: resolveBrand(item.productData),
+          comboScore: resolveComboScore(item.productData),
+          comboEligible: resolveComboEligible(item.productData),
+          comboGroup: resolveComboGroup(item.productData),
           activeImageCount: countActiveImages(queueImages),
           productName: resolveProductName(item.productData),
           coverImageId: deriveAutomaticCoverImageId(queueImages),
