@@ -9,6 +9,8 @@ export const siteConfig = {
   ogLocale: "es_AR",
   defaultOgImage: "/destacada.png",
   whatsappUrl: "https://wa.me/?text=",
+  instagramUrl: "https://www.instagram.com/_thewestrep/",
+  facebookUrl: "https://www.facebook.com/profile.php?id=61585939491132",
 } as const;
 
 export type SiteConfig = typeof siteConfig;
