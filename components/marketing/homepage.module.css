@@ -1,0 +1,26 @@
+.pageAurora {
+  min-height: 100%;
+}
+
+.contentStack {
+  position: relative;
+}
+
+.contentStack > section {
+  position: relative;
+}
+
+.contentStack > section:not(#top)::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: linear-gradient(180deg, rgba(8, 10, 18, 0.18), rgba(8, 10, 18, 0.4));
+  opacity: 0.14;
+  pointer-events: none;
+}
+
+.contentStack > section > * {
+  position: relative;
+  z-index: 1;
+}

@@ -4,10 +4,17 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ComponentProps, MouseEvent } from "react";
 
+import { computeAnchorScrollTop } from "@/lib/navigation/public-anchor-scroll";
+
 type PublicNavLinkProps = Omit<ComponentProps<typeof Link>, "href"> & { href: string };
 
 function isPlainLeftClick(event: MouseEvent<HTMLAnchorElement>) {
   return event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
+}
+
+function getStickyHeaderHeightPx() {
+  const header = document.querySelector<HTMLElement>("[data-public-header]");
+  return header?.getBoundingClientRect().height ?? 0;
 }
 
 export function PublicNavLink({ children, href, onClick, ...props }: PublicNavLinkProps) {
@@ -42,7 +49,13 @@ export function PublicNavLink({ children, href, onClick, ...props }: PublicNavLi
       window.history.pushState(null, "", nextUrl);
     }
 
-    targetElement.scrollIntoView({ behavior: "smooth", block: "start" });
+    const top = computeAnchorScrollTop({
+      currentScrollYPx: window.scrollY,
+      targetTopRelativeViewportPx: targetElement.getBoundingClientRect().top,
+      stickyHeaderHeightPx: getStickyHeaderHeightPx(),
+    });
+
+    window.scrollTo({ top, behavior: "smooth" });
   }
 
   return (
