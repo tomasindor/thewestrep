@@ -13,6 +13,10 @@ import {
   getProductSizeGuidesSchemaCompatibility,
   getProductSizeGuidesSchemaCompatibilityWarning,
 } from "@/lib/db/product-size-guides-schema-compat";
+import {
+  getProductsSchemaCompatibility,
+  getProductsSchemaCompatibilityWarning,
+} from "@/lib/db/products-schema-compat";
 import { brands, categories, productImages, products, productSizeGuides, productSizes, productVariants } from "@/lib/db/schema";
 import { buildEditableCommercialAvailabilityBySlug, enrichCommercialAvailabilityInfo } from "@/lib/catalog/commercial-availability";
 import {
@@ -116,6 +120,10 @@ function mapFallbackProducts() {
         productName: product.name,
         availability: product.availability,
       }),
+      comboEligible: product.comboEligible,
+      comboGroup: product.comboGroup,
+      comboPriority: product.comboPriority,
+      comboSourceKey: product.comboSourceKey,
       gallery:
         rawGallery.length > 0
           ? rawGallery
@@ -209,6 +217,28 @@ interface ProductImageRowCompat {
   position: number;
   source: "manual" | "yupoo";
   createdAt: Date;
+}
+
+interface ProductRowCompat {
+  id: string;
+  type: ProductAvailability;
+  name: string;
+  slug: string;
+  brandId: string;
+  categoryId: string;
+  priceArs: number;
+  description: string;
+  availabilityNote: string;
+  whatsappCtaLabel: string;
+  whatsappMessage: string;
+  comboEligible: boolean;
+  comboGroup: string | null;
+  comboPriority: number;
+  comboSourceKey: string | null;
+  state: ProductState;
+  sourceUrl: string | null;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 function normalizeVariantsManifest(value: unknown) {
@@ -344,6 +374,53 @@ async function selectBrandRows() {
   `);
 
   return normalizeSqlRows<BrandRowCompat>(result);
+}
+
+async function selectProductRows() {
+  const sqlClient = getDbSql();
+  const compatibility = await getProductsSchemaCompatibility();
+
+  if (!sqlClient) {
+    return {
+      rows: [] as ProductRowCompat[],
+      compatibility,
+    };
+  }
+
+  const comboEligibleSelection = compatibility.hasComboEligible ? "combo_eligible" : "false::boolean";
+  const comboGroupSelection = compatibility.hasComboGroup ? "combo_group" : "null::text";
+  const comboPrioritySelection = compatibility.hasComboPriority ? "combo_priority" : "0::integer";
+  const comboSourceKeySelection = compatibility.hasComboSourceKey ? "combo_source_key" : "null::text";
+
+  const result = await sqlClient.query(`
+    select
+      id,
+      type,
+      name,
+      slug,
+      brand_id as "brandId",
+      category_id as "categoryId",
+      price_ars as "priceArs",
+      description,
+      availability_note as "availabilityNote",
+      whatsapp_cta_label as "whatsappCtaLabel",
+      whatsapp_message as "whatsappMessage",
+      ${comboEligibleSelection} as "comboEligible",
+      ${comboGroupSelection} as "comboGroup",
+      ${comboPrioritySelection} as "comboPriority",
+      ${comboSourceKeySelection} as "comboSourceKey",
+      state,
+      source_url as "sourceUrl",
+      created_at as "createdAt",
+      updated_at as "updatedAt"
+    from products
+    order by updated_at desc, created_at desc
+  `);
+
+  return {
+    rows: normalizeSqlRows<ProductRowCompat>(result),
+    compatibility,
+  };
 }
 
 async function selectBrandManagedImageState(id: string) {
@@ -484,10 +561,10 @@ const loadDatabaseCatalog = cache(async function loadDatabaseCatalog() {
 
   try {
     const sizeGuideCompatibility = await getProductSizeGuidesSchemaCompatibility();
-    const [brandRows, categoryRows, productRows, productImageSelection, sizeRows, variantRows, sizeGuideRows] = await Promise.all([
+    const [brandRows, categoryRows, productSelection, productImageSelection, sizeRows, variantRows, sizeGuideRows] = await Promise.all([
       selectBrandRows(),
       db.select().from(categories).orderBy(asc(categories.name)),
-      db.select().from(products).orderBy(desc(products.updatedAt), desc(products.createdAt)),
+      selectProductRows(),
       selectProductImageRows(),
       db.select().from(productSizes).orderBy(asc(productSizes.position), asc(productSizes.createdAt)),
       db.select().from(productVariants).orderBy(asc(productVariants.position), asc(productVariants.createdAt)),
@@ -495,6 +572,11 @@ const loadDatabaseCatalog = cache(async function loadDatabaseCatalog() {
         ? db.select().from(productSizeGuides).orderBy(desc(productSizeGuides.updatedAt), desc(productSizeGuides.createdAt))
         : Promise.resolve([]),
     ]);
+    const productRows = productSelection.rows;
+    const productsSchemaWarning = getProductsSchemaCompatibilityWarning(productSelection.compatibility);
+    if (productsSchemaWarning) {
+      console.warn(productsSchemaWarning);
+    }
     const imageRows = productImageSelection.rows;
 
     const imagesByProductId = new Map<string, typeof imageRows>();
@@ -635,6 +717,10 @@ const loadDatabaseCatalog = cache(async function loadDatabaseCatalog() {
             label: variant.label,
           })),
           sourceUrl: product.sourceUrl ?? undefined,
+          comboEligible: product.comboEligible,
+          comboGroup: product.comboGroup ?? undefined,
+          comboPriority: product.comboPriority,
+          comboSourceKey: product.comboSourceKey ?? undefined,
         } satisfies Product;
       }),
     };

@@ -11,14 +11,225 @@ import {
   type CatalogProductFilters,
   type CatalogProductSort,
   type HomepageBrandSpotlight,
+  type HomepageComboHighlight,
   type HomepageCategorySpotlight,
   type HomepageFeaturedProduct,
 } from "@/lib/catalog/models";
 import { buildBrandImageAlt, buildCategoryImageAlt } from "@/lib/catalog/image-alt";
 import { brands as fallbackBrands, homepageBrandPriorityIds } from "@/lib/catalog/data/brands";
+import { heroPromoProducts, isHeroPromoCurationEnabled, type HeroPromoProductsConfig } from "@/lib/curations/hero-promo-products";
 import { getCatalogDataset, getProductsRepository } from "@/lib/catalog/repository";
+import { calculateComboPricing } from "@/lib/pricing/encargue-combos-core";
 
-type CatalogSearchParams = Record<string, string | string[] | undefined>;
+export type CatalogSearchParams = Record<string, string | string[] | undefined>;
+
+export interface PromoPresetBanner {
+  title: string;
+  rules: string;
+  disclosure: string;
+}
+
+export interface PromoPreset {
+  id: "combo-2da-30";
+  categorySlugs: string[];
+  categoryIds?: string[];
+  banner: PromoPresetBanner;
+}
+
+const PROMO_PRESET_DEFINITIONS: Record<PromoPreset["id"], Omit<PromoPreset, "categoryIds">> = {
+  "combo-2da-30": {
+    id: "combo-2da-30",
+    categorySlugs: ["pantalones", "buzos", "camperas"],
+    banner: {
+      title: "30% OFF en la segunda unidad",
+      rules: "Combiná 1 pantalón + 1 buzo/campera",
+      disclosure: "Descuento sobre la prenda más barata",
+    },
+  },
+};
+
+const HERO_PROMO_VISUAL_FALLBACK = {
+  topRow: [
+    { slug: "mock-buzo-gris", name: "Campera preview 1", image: "/campera.png", alt: "Campera recortada sobre fondo oscuro" },
+    { slug: "mock-campera-black", name: "Campera preview 2", image: "/campera.png", alt: "Campera recortada sobre fondo oscuro" },
+    { slug: "mock-buzo-cream", name: "Campera preview 3", image: "/campera.png", alt: "Campera recortada sobre fondo oscuro" },
+    { slug: "mock-campera-street", name: "Campera preview 4", image: "/campera.png", alt: "Campera recortada sobre fondo oscuro" },
+    { slug: "mock-buzo-logo", name: "Campera preview 5", image: "/campera.png", alt: "Campera recortada sobre fondo oscuro" },
+    { slug: "mock-campera-puffer", name: "Campera preview 6", image: "/campera.png", alt: "Campera recortada sobre fondo oscuro" },
+  ],
+  bottomRow: [
+    { slug: "mock-pantalon-cargo", name: "Pantalón preview 1", image: "/pantalones.png", alt: "Pantalón recortado sobre fondo oscuro" },
+    { slug: "mock-pantalon-wide", name: "Pantalón preview 2", image: "/pantalones.png", alt: "Pantalón recortado sobre fondo oscuro" },
+    { slug: "mock-pantalon-denim", name: "Pantalón preview 3", image: "/pantalones.png", alt: "Pantalón recortado sobre fondo oscuro" },
+    { slug: "mock-pantalon-utility", name: "Pantalón preview 4", image: "/pantalones.png", alt: "Pantalón recortado sobre fondo oscuro" },
+    { slug: "mock-pantalon-relaxed", name: "Pantalón preview 5", image: "/pantalones.png", alt: "Pantalón recortado sobre fondo oscuro" },
+    { slug: "mock-pantalon-nylon", name: "Pantalón preview 6", image: "/pantalones.png", alt: "Pantalón recortado sobre fondo oscuro" },
+  ],
+} as const;
+
+function buildMockHeroPromoProduct(
+  item: (typeof HERO_PROMO_VISUAL_FALLBACK.topRow)[number] | (typeof HERO_PROMO_VISUAL_FALLBACK.bottomRow)[number],
+  category: CatalogProduct["category"],
+): CatalogProduct {
+  const brand = {
+    id: "hero-promo-mock-brand",
+    name: "TheWestRep",
+    slug: "thewestrep",
+    alt: "TheWestRep",
+  };
+
+  return {
+    id: item.slug,
+    slug: item.slug,
+    sku: item.slug.toUpperCase(),
+    name: item.name,
+    brandId: brand.id,
+    categoryId: category.id,
+    availability: "encargue",
+    state: "published",
+    pricing: {
+      amount: 0,
+      currency: "ARS",
+      display: "Consultar",
+    },
+    detail: "Visual temporal para validar el hero promocional.",
+    note: "Mock visual",
+    availabilityInfo: {
+      summary: "Encargue",
+    },
+    gallery: [
+      {
+        id: `${item.slug}-cover`,
+        src: item.image,
+        alt: item.alt,
+        role: "cover",
+        provider: "local",
+      },
+    ],
+    brand,
+    category,
+    availabilityLabel: getAvailabilityLabel("encargue"),
+    image: item.image,
+    alt: item.alt,
+  };
+}
+
+function buildVisualFallbackHeroPromoProducts() {
+  const topCategory = {
+    id: "hero-promo-top",
+    name: "Buzos / Camperas",
+    slug: "buzos-camperas",
+    description: "Fila superior visual temporal",
+    image: "/demo-hoodie.svg",
+    alt: "Buzos y camperas",
+  };
+
+  const bottomCategory = {
+    id: "hero-promo-bottom",
+    name: "Pantalones",
+    slug: "pantalones",
+    description: "Fila inferior visual temporal",
+    image: "/demo-tee.svg",
+    alt: "Pantalones",
+  };
+
+  return {
+    topRow: HERO_PROMO_VISUAL_FALLBACK.topRow.map((item) => buildMockHeroPromoProduct(item, topCategory)),
+    bottomRow: HERO_PROMO_VISUAL_FALLBACK.bottomRow.map((item) => buildMockHeroPromoProduct(item, bottomCategory)),
+    isEnabled: true,
+  };
+}
+
+function buildEmptyHeroPromoProducts() {
+  return {
+    topRow: [] as CatalogProduct[],
+    bottomRow: [] as CatalogProduct[],
+    isEnabled: false,
+  };
+}
+
+export function pickCuratedHeroProducts<T>(config: HeroPromoProductsConfig, productsBySlug: Map<string, T>) {
+  const pickRow = (row: string[]) =>
+    row.flatMap((slug) => {
+      const product = productsBySlug.get(slug);
+      return product ? [product] : [];
+    });
+
+  return {
+    topRow: pickRow(config.topRow),
+    bottomRow: pickRow(config.bottomRow),
+  };
+}
+
+export function selectHeroPromoProductsFromCuration(config: HeroPromoProductsConfig, productsBySlug: Map<string, CatalogProduct>) {
+  if (!isHeroPromoCurationEnabled(config)) {
+    return buildEmptyHeroPromoProducts();
+  }
+
+  const curated = pickCuratedHeroProducts(config, productsBySlug);
+
+  if (curated.topRow.length === 0 || curated.bottomRow.length === 0) {
+    return buildEmptyHeroPromoProducts();
+  }
+
+  return {
+    ...curated,
+    isEnabled: true,
+  };
+}
+
+export function getHeroPromoPreviewProducts() {
+  return buildVisualFallbackHeroPromoProducts();
+}
+
+export async function resolvePromoPreset(promoId?: string): Promise<PromoPreset | null> {
+  if (promoId !== "combo-2da-30") {
+    return null;
+  }
+
+  return { ...PROMO_PRESET_DEFINITIONS[promoId] };
+}
+
+export async function resolvePromoPresetCategoryIds(preset: PromoPreset): Promise<string[]> {
+  const categories = await getCategories();
+
+  return preset.categorySlugs.flatMap((slug) => {
+    const category = categories.find((item) => item.slug === slug || item.id === slug);
+    return category ? [category.id] : [];
+  });
+}
+
+export function applyPromoPresetFilters(filters: CatalogProductFilters, preset: PromoPreset | null): CatalogProductFilters {
+  if (!preset || !preset.categoryIds || preset.categoryIds.length === 0) {
+    return filters;
+  }
+
+  return {
+    ...filters,
+    promoId: preset.id,
+    categoryIds: preset.categoryIds,
+  };
+}
+
+export function resolvePromoIdFromSearchParams(searchParams: CatalogSearchParams): string | undefined {
+  const promoValue = getSingleSearchParamValue(searchParams.promo);
+  return promoValue && promoValue.length > 0 ? promoValue : undefined;
+}
+
+export function getPromoBannerForCatalogListing(
+  availability: ProductAvailability,
+  preset: PromoPreset | null,
+): PromoPresetBanner | null {
+  if (availability !== "encargue" || !preset) {
+    return null;
+  }
+
+  return {
+    title: preset.banner.title,
+    rules: preset.banner.rules,
+    disclosure: preset.banner.disclosure,
+  };
+}
 
 function pickRandomUniqueItems<T>(items: readonly T[], limit: number) {
   const shuffledItems = [...items];
@@ -110,12 +321,16 @@ function sortCatalogProducts(products: CatalogProduct[], sort: CatalogProductSor
   });
 }
 
-function matchesCatalogFilters(product: CatalogProduct, filters: CatalogProductFilters) {
+export function matchesCatalogFilters(product: CatalogProduct, filters: CatalogProductFilters) {
   if (filters.brandId && product.brand.id !== filters.brandId) {
     return false;
   }
 
   if (filters.categoryId && product.category.id !== filters.categoryId) {
+    return false;
+  }
+
+  if (filters.categoryIds?.length && !filters.categoryIds.includes(product.category.id)) {
     return false;
   }
 
@@ -191,12 +406,14 @@ export async function getProducts() {
 export function getCatalogFiltersFromSearchParams(searchParams: CatalogSearchParams): CatalogProductFilters {
   const brand = getSingleSearchParamValue(searchParams.brand);
   const category = getSingleSearchParamValue(searchParams.category);
+  const promo = getSingleSearchParamValue(searchParams.promo);
   const query = getSingleSearchParamValue(searchParams.q)?.trim();
   const sort = parseCatalogSort(getSingleSearchParamValue(searchParams.sort));
 
   return {
     brandId: brand,
     categoryId: category,
+    promoId: promo,
     query,
     sort,
   };
@@ -227,12 +444,14 @@ export async function getCatalogFilterGroups(filters: CatalogProductFilters = {}
     matchesCatalogFilters(product, {
       ...sharedScopedFilters,
       categoryId: filters.categoryId,
+      categoryIds: filters.categoryIds,
     }),
   );
   const categoryScopedProducts = context.products.filter((product) =>
     matchesCatalogFilters(product, {
       ...sharedScopedFilters,
       brandId: filters.brandId,
+      categoryIds: filters.categoryIds,
     }),
   );
 
@@ -408,6 +627,88 @@ export async function getHomepageFeaturedProducts(
   const uniqueProducts = Array.from(new Map(products.map((product) => [product.id, product])).values());
 
   return pickRandomUniqueItems(uniqueProducts, 5);
+}
+
+export async function getHeroPromoProducts() {
+  const products = await getCatalogProducts({ availability: "encargue", states: ["published"] });
+  const bySlug = new Map(products.map((product) => [product.slug, product]));
+  return selectHeroPromoProductsFromCuration(heroPromoProducts, bySlug);
+}
+
+function normalizeComboCandidates(products: CatalogProduct[]) {
+  return products.filter((product) =>
+    product.availability === "encargue"
+    && product.state === "published"
+    && product.comboEligible
+    && Boolean(product.comboGroup),
+  );
+}
+
+export async function getHomepageComboHighlights(limit = 3): Promise<HomepageComboHighlight[]> {
+  const products = await getCatalogProducts({ availability: "encargue", states: ["published"] });
+  const comboCandidates = normalizeComboCandidates(products);
+  const byGroup = new Map<string, CatalogProduct[]>();
+
+  for (const product of comboCandidates) {
+    const group = product.comboGroup?.trim();
+
+    if (!group) {
+      continue;
+    }
+
+    const current = byGroup.get(group) ?? [];
+    current.push(product);
+    byGroup.set(group, current);
+  }
+
+  const highlights: HomepageComboHighlight[] = [];
+
+  for (const [comboGroup, groupProducts] of byGroup.entries()) {
+    const lineById = new Map(groupProducts.map((product) => [product.id, product]));
+    const pricing = calculateComboPricing(
+      groupProducts.map((product) => ({
+        lineId: product.id,
+        productId: product.id,
+        productSlug: product.slug,
+        productName: product.name,
+        priceArs: product.pricing.amount,
+        quantity: 1,
+        categorySlug: product.category.slug,
+        comboGroup,
+      })),
+    );
+
+    if (!pricing || pricing.appliedDiscounts.length === 0) {
+      continue;
+    }
+
+    const discount = pricing.appliedDiscounts[0]!;
+    const discountedProduct = lineById.get(discount.lineId);
+    const pairedProduct = discount.pairedWithLineId ? lineById.get(discount.pairedWithLineId) : undefined;
+
+    if (!discountedProduct || !pairedProduct) {
+      continue;
+    }
+
+    const first = discountedProduct;
+    const second = pairedProduct;
+    const top = first.category.slug.includes("pantal") || first.category.slug.includes("short") ? second : first;
+    const bottom = top.id === first.id ? second : first;
+    const originalPairAmountArs = top.pricing.amount + bottom.pricing.amount;
+
+    highlights.push({
+      comboGroup,
+      top,
+      bottom,
+      originalPairAmountArs,
+      comboPairAmountArs: originalPairAmountArs - discount.amountArs,
+      discountAmountArs: discount.amountArs,
+    });
+  }
+
+  return highlights
+    .sort((left, right) => right.discountAmountArs - left.discountAmountArs)
+    .slice(0, Math.max(limit, 0));
 }
 
 export async function getHomepageProductFilters() {

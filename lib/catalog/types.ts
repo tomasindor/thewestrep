@@ -117,6 +117,11 @@ export interface Product {
   badge?: ProductBadge;
   featuredOnHomepage?: boolean;
   sourceUrl?: string;
+  comboEligible?: boolean;
+  comboGroup?: string;
+  comboPriority?: number;
+  comboSourceKey?: string;
+  comboScore?: number;
 }
 
 export interface EditableInventoryProduct {
