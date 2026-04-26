@@ -64,13 +64,13 @@ export function CheckoutAccessStep({
         <div className="max-w-3xl space-y-3">
           <h1 className="font-display text-4xl leading-none text-white sm:text-6xl">Elegí cómo querés entrar antes de seguir.</h1>
           <p className="text-sm leading-6 text-slate-300 sm:text-base">
-            Primero resolvemos tu acceso con cuenta, registro o Google. Después sí abrimos el checkout y, si corresponde, la aclaración obligatoria de encargue asistido.
+            Primero resolvemos tu acceso con cuenta, registro o Google. Después seguís al checkout con tus datos y, si hay encargue, te mostramos cómo coordinamos la importación y la entrega local.
           </p>
         </div>
 
         <div className="rounded-[1.4rem] border border-[rgba(210,138,163,0.22)] bg-[rgba(210,138,163,0.08)] px-4 py-3 text-sm text-slate-200">
           <p className="font-semibold text-white">Orden del flujo</p>
-          <p className="mt-1">Acceso → aclaración de encargue asistido (si aplica) → checkout.</p>
+          <p className="mt-1">Acceso → checkout → coordinación del pedido.</p>
         </div>
       </div>
 

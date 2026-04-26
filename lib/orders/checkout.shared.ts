@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { CORREO_ARGENTINO_FEE } from "@/lib/cart/assisted-orders";
 import type { CustomerProfileSnapshot } from "@/lib/auth/customer-profile";
+import { calculateComboPricing } from "@/lib/pricing/encargue-combos-core";
 
 // ─── Zod Schemas ─────────────────────────────────────────────────────────────────
 
@@ -38,8 +39,22 @@ export const checkoutOrderItemSchema = z.object({
   productImage: orderImageSchema,
   availability: z.enum(["stock", "encargue"]),
   availabilityLabel: z.string().trim().min(1),
+  categorySlug: z.string().trim().optional(),
   priceDisplay: z.string().trim().min(1),
   quantity: z.number().int().min(1).max(99),
+  comboEligible: z.boolean().optional(),
+  comboGroup: z.string().trim().optional(),
+  comboPriority: z.number().int().optional(),
+  comboSourceKey: z.string().trim().optional(),
+  comboScore: z.number().min(0).max(1).optional(),
+  comboDiscount: z
+    .object({
+      amountArs: z.number(),
+      reason: z.string(),
+      pairedWithProductId: z.string().trim().min(1),
+      pairedWithProductName: z.string().optional(),
+    })
+    .optional(),
   variantLabel: z.string().trim().optional(),
   sizeLabel: z.string().trim().optional(),
 });
@@ -55,6 +70,13 @@ export type CheckoutOrderPayload = z.infer<typeof checkoutOrderPayloadSchema>;
 
 export interface OrderPricingSummary {
   assistedFeeAmountArs: number;
+  comboDiscountAmountArs: number;
+  comboDiscountByLineId: Record<string, {
+    amountArs: number;
+    reason: string;
+    pairedWithProductId?: string;
+    pairedWithProductName?: string;
+  }>;
   shippingAmountArs: number;
   subtotalAmountArs: number;
   totalAmountArs: number;
@@ -106,6 +128,33 @@ export function buildOrderPricingSummary(payload: CheckoutOrderPayload): OrderPr
     (total, item) => total + getPriceAmount(item.priceDisplay) * item.quantity,
     0,
   );
+  const comboPricing = calculateComboPricing(
+    payload.items.map((item) => ({
+      lineId: item.id,
+      productId: item.productId,
+      productSlug: item.productSlug,
+      productName: item.productName,
+      priceArs: getPriceAmount(item.priceDisplay),
+      quantity: item.quantity,
+      comboGroup: item.comboGroup,
+      comboPriority: item.comboPriority,
+      categorySlug: item.categorySlug,
+    })),
+  );
+  const comboDiscountAmountArs = comboPricing?.comboDiscount ?? 0;
+  const comboDiscountByLineId = (comboPricing?.appliedDiscounts ?? []).reduce<OrderPricingSummary["comboDiscountByLineId"]>(
+    (accumulator, entry) => {
+      const current = accumulator[entry.lineId];
+      accumulator[entry.lineId] = {
+        amountArs: (current?.amountArs ?? 0) + entry.amountArs,
+        reason: entry.reason,
+        pairedWithProductId: entry.pairedWithProductId,
+        pairedWithProductName: entry.pairedWithProductName,
+      };
+      return accumulator;
+    },
+    {},
+  );
   const shippingAmountArs = getFulfillmentFeeAmount(payload.customer.fulfillment);
   const assistedFeeAmountArs = payload.items.some((item) => item.availability === "encargue")
     ? CORREO_ARGENTINO_FEE
@@ -114,9 +163,11 @@ export function buildOrderPricingSummary(payload: CheckoutOrderPayload): OrderPr
 
   return {
     subtotalAmountArs,
+    comboDiscountAmountArs,
+    comboDiscountByLineId,
     shippingAmountArs,
     assistedFeeAmountArs,
-    totalAmountArs: subtotalAmountArs + shippingAmountArs + assistedFeeAmountArs,
+    totalAmountArs: subtotalAmountArs - comboDiscountAmountArs + shippingAmountArs + assistedFeeAmountArs,
     unitCount,
   };
 }

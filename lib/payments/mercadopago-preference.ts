@@ -63,6 +63,17 @@ export function buildMercadoPagoPreferenceBody(order: CreatedOrderSummary, paylo
             },
           ]
         : []),
+      ...(pricing.comboDiscountAmountArs > 0
+        ? [
+            {
+              id: "combo-discount",
+              title: "Descuento combo",
+              quantity: 1,
+              unit_price: -pricing.comboDiscountAmountArs,
+              currency_id: "ARS",
+            },
+          ]
+        : []),
     ],
     metadata: {
       checkoutMode: order.checkoutMode,

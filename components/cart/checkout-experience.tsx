@@ -10,7 +10,6 @@ import { CheckoutAccessGate } from "@/components/cart/checkout-access-gate";
 import { ContactFormSection } from "@/components/cart/contact-form-section";
 import { FulfillmentSection } from "@/components/cart/fulfillment-section";
 import { OrderSummarySidebar } from "@/components/cart/order-summary-sidebar";
-import { AssistedOrderModal } from "@/components/cart/assisted-order-modal";
 
 interface CheckoutExperienceProps {
   customerAuth: CheckoutAccessCustomerAuthState | null;
@@ -26,16 +25,13 @@ export function CheckoutExperience({
 
   const {
     subtotal,
+    comboDiscountAmountArs,
     shippingFee,
     correoArgentinoFeeTotal,
     total,
     hasRequiredFields,
     hasResolvedAccess,
     hasEncargueOrder,
-    requiresAssistedOrderAcknowledgement,
-    acceptedAssistedOrderSignature,
-    checkedAssistedOrderSignature,
-    assistedOrderSignature,
     isSubmittingOrder,
     isSubmitted,
     submittedOrder,
@@ -43,8 +39,6 @@ export function CheckoutExperience({
     hasTriedSubmit,
     savedShippingSummary,
     placeOrder,
-    acceptAssistedOrder,
-    checkAssistedOrderTerms,
     markTriedSubmit,
   } = controller;
 
@@ -89,13 +83,13 @@ export function CheckoutExperience({
                   items={items}
                   customer={customer}
                   subtotal={subtotal}
+                  comboDiscountAmountArs={comboDiscountAmountArs}
                   shippingFee={shippingFee}
                   correoArgentinoFeeTotal={correoArgentinoFeeTotal}
                   total={total}
                   itemCount={itemCount}
                   hasRequiredFields={hasRequiredFields}
                   hasEncargueOrder={hasEncargueOrder}
-                  requiresAssistedOrderAcknowledgement={requiresAssistedOrderAcknowledgement}
                   isSubmittingOrder={isSubmittingOrder}
                   isSubmitted={isSubmitted}
                   submittedOrder={submittedOrder}
@@ -109,17 +103,6 @@ export function CheckoutExperience({
           </>
         )}
       </div>
-
-      <AssistedOrderModal
-        hasEncargueOrder={hasEncargueOrder}
-        requiresAssistedOrderAcknowledgement={requiresAssistedOrderAcknowledgement}
-        acceptedAssistedOrderSignature={acceptedAssistedOrderSignature}
-        checkedAssistedOrderSignature={checkedAssistedOrderSignature}
-        assistedOrderSignature={assistedOrderSignature}
-        correoArgentinoFeeTotal={correoArgentinoFeeTotal}
-        onAccept={acceptAssistedOrder}
-        onCheck={checkAssistedOrderTerms}
-      />
     </main>
   );
 }

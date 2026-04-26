@@ -39,13 +39,13 @@ interface OrderSummarySidebarProps {
   items: CartItem[];
   customer: CartCustomerProfile;
   subtotal: number;
+  comboDiscountAmountArs: number;
   shippingFee: number;
   correoArgentinoFeeTotal: number;
   total: number;
   itemCount: number;
   hasRequiredFields: boolean;
   hasEncargueOrder: boolean;
-  requiresAssistedOrderAcknowledgement: boolean;
   isSubmittingOrder: boolean;
   isSubmitted: boolean;
   submittedOrder: SubmittedOrder | null;
@@ -59,13 +59,13 @@ export function OrderSummarySidebar({
   items,
   customer,
   subtotal,
+  comboDiscountAmountArs,
   shippingFee,
   correoArgentinoFeeTotal,
   total,
   itemCount,
   hasRequiredFields,
   hasEncargueOrder,
-  requiresAssistedOrderAcknowledgement,
   isSubmittingOrder,
   isSubmitted,
   submittedOrder,
@@ -161,6 +161,12 @@ export function OrderSummarySidebar({
               {customer.fulfillment ? (shippingFee === 0 ? "Sin cargo" : formatArs(shippingFee)) : "Elegí modalidad"}
             </span>
           </div>
+          {comboDiscountAmountArs > 0 ? (
+            <div className="mt-3 flex items-center justify-between gap-4 text-emerald-200">
+              <span>Descuento combo</span>
+              <span className="text-right">-{formatArs(comboDiscountAmountArs)}</span>
+            </div>
+          ) : null}
           {hasEncargueOrder ? (
             <div className="mt-3 flex items-center justify-between gap-4">
               <span>Correo Argentino</span>
@@ -198,9 +204,7 @@ export function OrderSummarySidebar({
           <ul className="mt-3 space-y-2">
             <li>• Acceso: {getCheckoutModeLabel(customer.checkoutMode, customer.authProvider)}.</li>
             <li>• Datos obligatorios: {hasRequiredFields ? "completos" : "faltan completar"}.</li>
-            <li>
-              • Encargue asistido: {hasEncargueOrder ? (requiresAssistedOrderAcknowledgement ? "pendiente de aceptación" : "listo para continuar") : "no aplica"}.
-            </li>
+            <li>• Encargue asistido: {hasEncargueOrder ? "nos ocupamos de la importación y del despacho local" : "no aplica"}.</li>
             <li>• Confirmación: {isSubmitted ? `pedido guardado como ${submittedOrder?.reference}` : "pendiente"}.</li>
             <li>• Si necesitás ajustar algo, podés volver al carrito en cualquier momento.</li>
           </ul>
@@ -212,9 +216,9 @@ export function OrderSummarySidebar({
           </p>
         ) : null}
 
-        {hasTriedSubmit && (!hasRequiredFields || requiresAssistedOrderAcknowledgement) ? (
+        {hasTriedSubmit && !hasRequiredFields ? (
           <p className="mt-4 rounded-[1.2rem] border border-red-300/30 bg-red-500/10 px-4 py-3 text-sm text-red-100">
-            Completá nombre, teléfono, email, modalidad y ubicación. Si hay encargue asistido, primero aceptá la aclaración obligatoria para seguir.
+            Completá nombre, teléfono, email, modalidad y ubicación para seguir.
           </p>
         ) : null}
 
