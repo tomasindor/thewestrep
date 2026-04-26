@@ -20,6 +20,16 @@ interface QueueItemWithImages {
   images: readonly ActiveImageCandidate[];
 }
 
+interface QueueItemIdentity {
+  id: string;
+}
+
+interface QueueItemPromotionMeta {
+  status?: string;
+  mediaStatus?: string;
+  promotionError?: string | null;
+}
+
 const MAX_UNDO_STACK_SIZE = 20;
 
 export function getNextKeyboardImageIndex(input: KeyboardImageInput) {
@@ -102,6 +112,109 @@ export function applyBulkPromotionResultToQueue<T extends { id: string }>(
   return {
     items: remainingItems,
     activeItemId: nextActiveItemId,
+  };
+}
+
+export function createQueuePager<T>(input: {
+  items: readonly T[];
+  currentPage: number;
+  pageSize: number;
+}) {
+  const safePageSize = Math.max(1, Math.trunc(input.pageSize));
+  const totalPages = Math.max(1, Math.ceil(input.items.length / safePageSize));
+  const currentPage = Math.min(totalPages, Math.max(1, Math.trunc(input.currentPage)));
+  const start = (currentPage - 1) * safePageSize;
+  const end = start + safePageSize;
+
+  return {
+    currentPage,
+    pageSize: safePageSize,
+    totalItems: input.items.length,
+    totalPages,
+    visibleItems: input.items.slice(start, end),
+  };
+}
+
+function markQueueItemAsPromotionFailed<T extends QueueItemIdentity & QueueItemPromotionMeta>(item: T, reason: string): T {
+  return {
+    ...item,
+    status: "media_failed",
+    mediaStatus: "failed",
+    promotionError: reason,
+  };
+}
+
+export function startOptimisticQueuePromotion<T extends QueueItemIdentity>(
+  current: { items: readonly T[]; activeItemId: string | null },
+  targetItemIds: readonly string[],
+) {
+  const targetIds = new Set(targetItemIds);
+  const removedItems = current.items.filter((item) => targetIds.has(item.id));
+  const queue = applyBulkPromotionResultToQueue(current, targetItemIds);
+
+  return {
+    queue,
+    removedItems,
+    promotingItemIds: removedItems.map((item) => item.id),
+  };
+}
+
+export function finishOptimisticQueuePromotion<T extends QueueItemIdentity & QueueItemPromotionMeta>(
+  started: {
+    queue: { items: readonly T[]; activeItemId: string | null };
+    removedItems: readonly T[];
+    promotingItemIds: readonly string[];
+  },
+  outcome: {
+    promotedItemIds: readonly string[];
+    blocked: ReadonlyArray<{ itemId: string; reason: string }>;
+  },
+) {
+  const blockedReasons = new Map(outcome.blocked.map((entry) => [entry.itemId, entry.reason]));
+  const restoredFailedItems = started.removedItems
+    .filter((item) => blockedReasons.has(item.id))
+    .map((item) => markQueueItemAsPromotionFailed(item, blockedReasons.get(item.id) ?? "Promoción fallida"));
+  const restoredIds = new Set(restoredFailedItems.map((item) => item.id));
+  const remainingPromotingItemIds = started.promotingItemIds.filter((itemId) => !outcome.promotedItemIds.includes(itemId) && !restoredIds.has(itemId));
+
+  const queueItems = [...restoredFailedItems, ...started.queue.items];
+  const activeItemId = started.queue.activeItemId && queueItems.some((item) => item.id === started.queue.activeItemId)
+    ? started.queue.activeItemId
+    : queueItems[0]?.id ?? null;
+
+  return {
+    queue: {
+      items: queueItems,
+      activeItemId,
+    },
+    restoredFailedItems,
+    remainingPromotingItemIds,
+  };
+}
+
+export function resolveQueueItemVisualState(input: {
+  itemStatus: string;
+  isPromoting: boolean;
+  promotionError?: string | null;
+}) {
+  if (input.isPromoting) {
+    return {
+      tone: "promoting" as const,
+      label: "Promocionando...",
+    };
+  }
+
+  if (input.itemStatus === "media_failed") {
+    return {
+      tone: "failed" as const,
+      label: "Promoción fallida",
+      error: input.promotionError ?? null,
+    };
+  }
+
+  return {
+    tone: "queued" as const,
+    label: "En cola",
   };
 }
 

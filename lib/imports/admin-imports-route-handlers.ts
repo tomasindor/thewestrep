@@ -217,6 +217,12 @@ if (body.action === "update-item") {
   if (typeof body.updateData?.categoryName === "string") {
     updateData.categoryName = body.updateData.categoryName;
   }
+  if (typeof body.updateData?.comboEligible === "boolean") {
+    updateData.comboEligible = body.updateData.comboEligible;
+  }
+  if (typeof body.updateData?.comboGroup === "string") {
+    updateData.comboGroup = body.updateData.comboGroup;
+  }
 
   const result = await deps.updateImportItem(itemId, updateData);
   return Response.json({ ok: true, data: result });

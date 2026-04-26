@@ -4,15 +4,18 @@ import Image from "next/image";
 import { useEffect, useMemo, useState } from "react";
 
 import {
-  applyBulkPromotionResultToQueue,
   buildReviewImageUrl,
+  createQueuePager,
+  finishOptimisticQueuePromotion,
   formatCarouselPositionLabel,
   getKeyboardReviewAction,
   getNextKeyboardImageIndex,
   popLastRejectUndo,
   pushRejectUndo,
+  resolveQueueItemVisualState,
   resolveBestActiveItemAfterImageMutation,
   resolvePrimaryQuickActions,
+  startOptimisticQueuePromotion,
   type RejectUndoEntry,
 } from "@/lib/imports/admin-curation-ui-state";
 import { compactGhostCtaClassName, compactSolidCtaClassName } from "@/lib/ui";
@@ -33,10 +36,13 @@ interface ImportsReviewItem {
   id: string;
   status: "pending" | "approved" | "rejected" | "promoted" | "media_failed";
   mediaStatus: "pending" | "ready" | "failed";
+  promotionError?: string | null;
   sourceReference: string | null;
   finalName: string | null;
   finalPrice: number | null;
   brand: string | null;
+  comboEligible: boolean;
+  comboGroup: string | null;
   activeImageCount: number;
   productName: string | null;
   coverImageId: string | null;
@@ -68,6 +74,7 @@ function updateImageState(items: ImportsReviewItem[], imageId: string, nextState
       ...item,
       status: importItemStatus,
       mediaStatus: item.mediaStatus,
+      promotionError: item.promotionError ?? null,
       coverImageId,
       activeImageCount: nextActiveCount,
       promotionEligible: nextPromotionEligible,
@@ -80,9 +87,11 @@ function updateImageState(items: ImportsReviewItem[], imageId: string, nextState
 export function ImportsReviewClient({ initialItems }: ImportsReviewClientProps) {
   const [items, setItems] = useState(initialItems);
   const [activeItemId, setActiveItemId] = useState<string | null>(initialItems[0]?.id ?? null);
+  const [queuePage, setQueuePage] = useState(1);
   const [activeImageIndexByItem, setActiveImageIndexByItem] = useState<Record<string, number>>({});
   const [undoStack, setUndoStack] = useState<RejectUndoEntry[]>([]);
   const [pendingImageId, setPendingImageId] = useState<string | null>(null);
+  const [promotingItemsById, setPromotingItemsById] = useState<Record<string, ImportsReviewItem>>({});
 const [promoting, setPromoting] = useState(false);
 const [clearingQueue, setClearingQueue] = useState(false);
 const [deletingItemId, setDeletingItemId] = useState<string | null>(null);
@@ -96,6 +105,11 @@ const [promotionMessage, setPromotionMessage] = useState<string | null>(null);
     () => items.find((item) => item.id === activeItemId) ?? items[0] ?? null,
     [activeItemId, items],
   );
+  const queuePager = createQueuePager({
+    items,
+    currentPage: queuePage,
+    pageSize: 12,
+  });
 
   const activeImageIndex = activeItem
     ? Math.min(
@@ -112,6 +126,12 @@ const [promotionMessage, setPromotionMessage] = useState<string | null>(null);
       setActiveItemId(items[0].id);
     }
   }, [activeItemId, items]);
+
+  useEffect(() => {
+    if (queuePage !== queuePager.currentPage) {
+      setQueuePage(queuePager.currentPage);
+    }
+  }, [queuePage, queuePager.currentPage]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -223,6 +243,22 @@ const [promotionMessage, setPromotionMessage] = useState<string | null>(null);
       return;
     }
 
+    const started = startOptimisticQueuePromotion({ items, activeItemId }, itemIds);
+
+    if (started.promotingItemIds.length === 0) {
+      return;
+    }
+
+    setItems(started.queue.items);
+    setActiveItemId(started.queue.activeItemId);
+    setPromotingItemsById((current) => {
+      const next = { ...current };
+      for (const item of started.removedItems) {
+        next[item.id] = item;
+      }
+      return next;
+    });
+
     setPromoting(true);
     setError(null);
     setPromotionMessage(null);
@@ -244,22 +280,54 @@ const [promotionMessage, setPromotionMessage] = useState<string | null>(null);
         throw new Error(payload.error ?? "No se pudo promover en bloque.");
       }
 
-      setItems((currentItems) => {
-        const updated = applyBulkPromotionResultToQueue({
-          items: currentItems,
-          activeItemId,
-        }, payload.data?.promotedItemIds ?? []);
-
-        setActiveItemId(updated.activeItemId);
-        return updated.items;
+      const finished = finishOptimisticQueuePromotion({
+        queue: started.queue,
+        removedItems: started.removedItems,
+        promotingItemIds: started.promotingItemIds,
+      }, {
+        promotedItemIds: payload.data?.promotedItemIds ?? [],
+        blocked: payload.data?.blocked ?? [],
       });
+
+      setItems(finished.queue.items);
+      setActiveItemId(finished.queue.activeItemId);
+      setPromotingItemsById((current) => {
+        const next = { ...current };
+        for (const itemId of started.promotingItemIds) {
+          delete next[itemId];
+        }
+        return next;
+      });
+
+      if (finished.restoredFailedItems.length > 0) {
+        setError(`Fallaron ${finished.restoredFailedItems.length} promociones. Revisá los items marcados como "Promoción fallida".`);
+      }
 
       const blockedSummary = payload.data.blocked
         .map((entry) => `${entry.itemId}: ${entry.reason}`)
         .join(" · ");
       setPromotionMessage(`Promovidos: ${payload.data.promotedCount} · Bloqueados: ${payload.data.blocked.length}${blockedSummary ? ` · ${blockedSummary}` : ""}`);
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "No se pudo promover en bloque.");
+      const reason = requestError instanceof Error ? requestError.message : "No se pudo promover en bloque.";
+      const failed = finishOptimisticQueuePromotion({
+        queue: started.queue,
+        removedItems: started.removedItems,
+        promotingItemIds: started.promotingItemIds,
+      }, {
+        promotedItemIds: [],
+        blocked: started.promotingItemIds.map((itemId) => ({ itemId, reason })),
+      });
+
+      setItems(failed.queue.items);
+      setActiveItemId(failed.queue.activeItemId);
+      setPromotingItemsById((current) => {
+        const next = { ...current };
+        for (const itemId of started.promotingItemIds) {
+          delete next[itemId];
+        }
+        return next;
+      });
+      setError(reason);
     } finally {
       setPromoting(false);
     }
@@ -301,6 +369,7 @@ async function clearImportsQueue() {
 
     setItems([]);
     setActiveItemId(null);
+    setPromotingItemsById({});
     setPromotionMessage(`Cola vaciada. Jobs eliminados: ${payload.data.deletedJobs}.`);
   } catch (requestError) {
     setError(requestError instanceof Error ? requestError.message : "No se pudo vaciar la cola de importaciones.");
@@ -354,7 +423,7 @@ async function deleteSingleProduct(itemId: string) {
   }
 }
 
-async function updateProductData(itemId: string, data: { finalName?: string; finalPrice?: number; categoryName?: string }) {
+async function updateProductData(itemId: string, data: { finalName?: string; finalPrice?: number; categoryName?: string; comboEligible?: boolean; comboGroup?: string }) {
   setUpdatingItemId(itemId);
   setError(null);
 
@@ -383,6 +452,8 @@ async function updateProductData(itemId: string, data: { finalName?: string; fin
           finalName: data.finalName ?? item.finalName,
           finalPrice: data.finalPrice ?? item.finalPrice,
           brand: data.categoryName !== undefined ? data.categoryName : item.brand,
+          comboEligible: data.comboEligible ?? item.comboEligible,
+          comboGroup: data.comboGroup !== undefined ? data.comboGroup : item.comboGroup,
         };
       });
     });
@@ -411,6 +482,8 @@ async function updateProductData(itemId: string, data: { finalName?: string; fin
   const isPending = currentImage ? pendingImageId === currentImage.id : false;
   const isCover = currentImage ? currentImage.id === activeItem.coverImageId : false;
   const activeProductIndex = items.findIndex((item) => item.id === activeItem.id);
+  const promotingItems = Object.values(promotingItemsById);
+  const promotingItemIds = new Set(promotingItems.map((item) => item.id));
 
   return (
     <div className="space-y-5">
@@ -436,18 +509,41 @@ async function updateProductData(itemId: string, data: { finalName?: string; fin
 
       {error ? <p className="rounded-xl border border-red-400/20 bg-red-500/10 px-3 py-2 text-sm text-red-100">{error}</p> : null}
       {promotionMessage ? <p className="rounded-xl border border-emerald-300/20 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-100">{promotionMessage}</p> : null}
+      {promotingItems.length > 0 ? (
+        <div className="rounded-xl border border-sky-300/20 bg-sky-500/10 px-3 py-2 text-sm text-sky-100">
+          <p className="font-medium">Promocionando en segundo plano: {promotingItems.length}</p>
+          <p className="mt-1 text-xs text-sky-100/80">
+            {promotingItems.map((item) => item.finalName ?? item.productName ?? item.id).join(" · ")}
+          </p>
+        </div>
+      ) : null}
 
       <div className="grid gap-5 lg:grid-cols-[280px_minmax(0,1fr)]">
         <aside className="space-y-2 rounded-[1.4rem] border border-white/10 bg-white/[0.03] p-3">
-          {items.map((item, index) => (
+          {queuePager.visibleItems.map((item, index) => {
+            const visualState = resolveQueueItemVisualState({
+              itemStatus: item.status,
+              isPromoting: promotingItemIds.has(item.id),
+              promotionError: item.promotionError ?? null,
+            });
+
+            return (
             <div key={item.id} className={`space-y-2 rounded-xl border px-3 py-2 ${item.id === activeItem.id ? "border-[#d28aa3]/70 bg-[#d28aa3]/10" : "border-white/10 bg-white/0"}`}>
               <button
                 type="button"
                 className="w-full text-left text-sm text-slate-300 transition"
                 onClick={() => setActiveItemId(item.id)}
               >
-                <p className="font-medium text-white">{index + 1}. {item.finalName ?? item.productName ?? "Sin nombre"}</p>
+                <p className="font-medium text-white">{(queuePager.currentPage - 1) * queuePager.pageSize + index + 1}. {item.finalName ?? item.productName ?? "Sin nombre"}</p>
                 <p className="text-xs text-slate-400">{item.activeImageCount} imágenes activas · {item.promotionEligible ? "elegible" : "bloqueado"} · media {item.mediaStatus}</p>
+                <p className="mt-1 text-xs">
+                  <span className={`rounded-full border px-2 py-0.5 ${visualState.tone === "failed" ? "border-red-300/40 bg-red-500/20 text-red-100" : visualState.tone === "promoting" ? "border-sky-300/40 bg-sky-500/20 text-sky-100" : "border-white/20 bg-white/10 text-slate-200"}`}>
+                    {visualState.label}
+                  </span>
+                </p>
+                {visualState.tone === "failed" && visualState.error ? (
+                  <p className="mt-1 text-xs text-red-200">{visualState.error}</p>
+                ) : null}
               </button>
 <div className="flex flex-wrap gap-2">
   <button
@@ -468,8 +564,31 @@ async function updateProductData(itemId: string, data: { finalName?: string; fin
   </button>
 </div>
 </div>
-))}
-</aside>
+);
+})}
+
+          {queuePager.totalPages > 1 ? (
+            <div className="flex items-center justify-between gap-2 border-t border-white/10 pt-2">
+              <button
+                type="button"
+                className={compactGhostCtaClassName}
+                disabled={queuePager.currentPage <= 1}
+                onClick={() => setQueuePage((currentPage) => Math.max(1, currentPage - 1))}
+              >
+                ← Página anterior
+              </button>
+              <p className="text-xs text-slate-400">Página {queuePager.currentPage} / {queuePager.totalPages}</p>
+              <button
+                type="button"
+                className={compactGhostCtaClassName}
+                disabled={queuePager.currentPage >= queuePager.totalPages}
+                onClick={() => setQueuePage((currentPage) => Math.min(queuePager.totalPages, currentPage + 1))}
+              >
+                Página siguiente →
+              </button>
+            </div>
+          ) : null}
+        </aside>
 
 <article className="space-y-4 rounded-[1.4rem] border border-white/10 bg-white/[0.03] p-4">
 <header className="space-y-3">
@@ -611,6 +730,33 @@ async function updateProductData(itemId: string, data: { finalName?: string; fin
   <div className="space-y-1">
     <label className="text-xs text-slate-400">Imágenes activas</label>
     <p className="text-sm text-slate-300">{activeItem.activeImageCount}</p>
+  </div>
+
+  <div className="space-y-1">
+    <label className="text-xs text-slate-400">Combo group</label>
+    <input
+      type="text"
+      className="w-full rounded-md border border-white/10 bg-white/5 px-2 py-1.5 text-sm text-white focus:border-[#d28aa3] focus:outline-none"
+      defaultValue={activeItem.comboGroup ?? ""}
+      onBlur={(event) => {
+        const nextValue = event.currentTarget.value.trim();
+        if (activeItem.comboGroup !== nextValue) {
+          void updateProductData(activeItem.id, { comboGroup: nextValue });
+        }
+      }}
+    />
+  </div>
+
+  <div className="space-y-1">
+    <label className="text-xs text-slate-400">Combo eligible</label>
+    <button
+      type="button"
+      className={compactGhostCtaClassName}
+      onClick={() => void updateProductData(activeItem.id, { comboEligible: !activeItem.comboEligible })}
+      disabled={updatingItemId === activeItem.id}
+    >
+      {activeItem.comboEligible ? "Sí" : "No"}
+    </button>
   </div>
 </div>
 </header>

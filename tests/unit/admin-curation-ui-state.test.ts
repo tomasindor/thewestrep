@@ -4,12 +4,16 @@ import test from "node:test";
 import {
   applyBulkPromotionResultToQueue,
   buildReviewImageUrl,
+  createQueuePager,
+  finishOptimisticQueuePromotion,
   getKeyboardReviewAction,
   getNextKeyboardImageIndex,
   formatCarouselPositionLabel,
   popLastRejectUndo,
   pushRejectUndo,
+  startOptimisticQueuePromotion,
   resolveBestActiveItemAfterImageMutation,
+  resolveQueueItemVisualState,
   resolvePrimaryQuickActions,
 } from "../../lib/imports/admin-curation-ui-state";
 
@@ -121,4 +125,96 @@ test("resolveBestActiveItemAfterImageMutation keeps queue stable when current pr
 test("getKeyboardReviewAction maps ArrowDown to reject current image", () => {
   assert.equal(getKeyboardReviewAction("ArrowDown"), "reject");
   assert.equal(getKeyboardReviewAction("ArrowRight"), null);
+});
+
+test("createQueuePager keeps sidebar compact and bounded by page size", () => {
+  const items = Array.from({ length: 25 }, (_, index) => ({ id: `item-${index + 1}` }));
+
+  const firstPage = createQueuePager({
+    items,
+    currentPage: 1,
+    pageSize: 10,
+  });
+
+  assert.equal(firstPage.totalPages, 3);
+  assert.equal(firstPage.currentPage, 1);
+  assert.deepEqual(firstPage.visibleItems.map((item) => item.id), [
+    "item-1",
+    "item-2",
+    "item-3",
+    "item-4",
+    "item-5",
+    "item-6",
+    "item-7",
+    "item-8",
+    "item-9",
+    "item-10",
+  ]);
+
+  const lastPage = createQueuePager({
+    items,
+    currentPage: 3,
+    pageSize: 10,
+  });
+
+  assert.equal(lastPage.currentPage, 3);
+  assert.deepEqual(lastPage.visibleItems.map((item) => item.id), [
+    "item-21",
+    "item-22",
+    "item-23",
+    "item-24",
+    "item-25",
+  ]);
+});
+
+test("optimistic queue promotion removes immediately and restores failed items with operator-facing error", () => {
+  type QueueItem = {
+    id: string;
+    status: "approved" | "media_failed";
+    mediaStatus?: "pending" | "failed";
+    promotionError?: string | null;
+  };
+
+  const queue = {
+    items: [
+      { id: "item-1", status: "approved" },
+      { id: "item-2", status: "approved" },
+      { id: "item-3", status: "approved" },
+    ] as QueueItem[],
+    activeItemId: "item-2",
+  };
+
+  const started = startOptimisticQueuePromotion(queue, ["item-1", "item-2"]);
+  assert.deepEqual(started.queue.items.map((item) => item.id), ["item-3"]);
+  assert.equal(started.queue.activeItemId, "item-3");
+  assert.deepEqual(started.promotingItemIds, ["item-1", "item-2"]);
+
+  const finished = finishOptimisticQueuePromotion(started, {
+    promotedItemIds: ["item-1"],
+    blocked: [{ itemId: "item-2", reason: "R2 upload failed: timeout" }],
+  });
+
+  assert.deepEqual(finished.queue.items.map((item) => item.id), ["item-2", "item-3"]);
+  assert.equal(finished.restoredFailedItems.length, 1);
+  assert.equal(finished.restoredFailedItems[0]?.id, "item-2");
+  assert.equal(finished.restoredFailedItems[0]?.status, "media_failed");
+  assert.equal(finished.restoredFailedItems[0]?.promotionError, "R2 upload failed: timeout");
+});
+
+test("resolveQueueItemVisualState differentiates queued, promoting, and failed clearly", () => {
+  assert.deepEqual(resolveQueueItemVisualState({ itemStatus: "approved", isPromoting: false, promotionError: null }), {
+    tone: "queued",
+    label: "En cola",
+  });
+
+  assert.deepEqual(resolveQueueItemVisualState({ itemStatus: "approved", isPromoting: true, promotionError: null }), {
+    tone: "promoting",
+    label: "Promocionando...",
+  });
+
+  assert.deepEqual(resolveQueueItemVisualState({ itemStatus: "media_failed", isPromoting: false, promotionError: "R2 timeout" }), {
+    tone: "failed",
+    label: "Promoción fallida",
+    error: "R2 timeout",
+  });
 });

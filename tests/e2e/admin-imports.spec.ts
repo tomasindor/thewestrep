@@ -6,9 +6,9 @@ test.describe("admin imports product-centric curation", () => {
 
     const activeArticle = page.locator("article").first();
 
-    await expect(activeArticle.getByText(/^nombre final$/i)).toBeVisible();
-    await expect(activeArticle.getByText(/^precio final$/i)).toBeVisible();
-    await expect(activeArticle.getByText(/^marca$/i)).toBeVisible();
+    await expect(activeArticle.getByText(/^nombre$/i)).toBeVisible();
+    await expect(activeArticle.getByText(/^precio \(ars\)$/i)).toBeVisible();
+    await expect(activeArticle.getByText(/^categoría\/marca$/i)).toBeVisible();
     await expect(activeArticle.getByText(/^imágenes activas$/i)).toBeVisible();
 
     const stripButtons = page.locator('[data-testid="active-image-strip"] button[data-testid^="active-strip-image-"]');
@@ -96,6 +96,7 @@ test.describe("admin imports product-centric curation", () => {
 
     await expect(page.getByText(/promovidos: 1/i)).toBeVisible();
     await expect(page.getByText(/bloqueados: 1/i)).toBeVisible();
-    await expect(page.getByText(/insufficient useful images/i)).toBeVisible();
+    await expect(page.getByText(/insufficient useful images/i).first()).toBeVisible();
+    await expect(page.getByText(/promoción fallida/i).first()).toBeVisible();
   });
 });
