@@ -20,6 +20,7 @@
 | issue-creation | GitHub issue creation | Creating issues |
 | judgment-day | Adversarial review | `judgment day` |
 | go-testing | Go testing patterns | Go test files |
+| git-delivery | Safe commit, push, and PR workflow using gga | Commit, push, PR, pull request, preparing changes for review |
 | skill-creator | Create new AI skills | Creating skills |
 | skill-registry | Update this registry | `update skills` |
 
@@ -32,18 +33,31 @@
 - Prefer table-driven tests with subtests
 - Mock external dependencies with interfaces, not function variables
 
+### git-delivery
+- Inspect `git status`, `git diff`, `git diff --staged`, and recent `git log` before committing, pushing, or opening PRs.
+- Never commit secrets; stop on `.env`, credentials, keys, tokens, dumps, or private config.
+- Use conventional commits only; never add AI attribution or `Co-Authored-By` trailers.
+- Do not run builds as routine verification; prefer `npm run lint`, `npm run typecheck`, and relevant tests.
+- Run `gga run` on staged changes before committing; fix, re-stage, and re-run until clean.
+- Run `gga run --pr-mode --diff-only` before creating PRs; use full `--pr-mode` when small PRs need full-file context.
+- Use `gh` for PR creation/checks and push safely; never force-push unless explicitly requested, never to `main`/`master`.
+
 ## Project Conventions
 
 ### From AGENTS.md
 | File | Path | Notes |
 |------|------|-------|
-| AGENTS.md | /home/gonzalo/projects/thewestrep/AGENTS.md | Index — references nothing else |
-| CLAUDE.md | /home/gonzalo/projects/thewestrep/CLAUDE.md | References AGENTS.md |
+| AGENTS.md | /home/gonzalo/orca/workspaces/thewestrep/login/AGENTS.md | Index — references `skills/git-delivery/SKILL.md` |
+| CLAUDE.md | /home/gonzalo/orca/workspaces/thewestrep/login/CLAUDE.md | References AGENTS.md |
+| skills/git-delivery/SKILL.md | /home/gonzalo/orca/workspaces/thewestrep/login/skills/git-delivery/SKILL.md | Project skill for gga delivery workflow |
 
 ### Critical Rules (extracted)
 - **CRITICAL**: This is NOT the Next.js you know — APIs, conventions, and file structure differ from training data
 - **ALWAYS** read the relevant guide in `node_modules/next/dist/docs/` before writing any code
 - Heed deprecation notices
+- **CRITICAL**: Load `skills/git-delivery/SKILL.md` before commits, pushes, or pull requests
+- Use `gga run` before committing staged changes and `gga run --pr-mode --diff-only` before opening PRs
+- Do not run builds as part of routine verification
 
 ## Tech Stack Context
 
@@ -75,7 +89,8 @@
 
 ## Relevant Files
 
-- `/home/gonzalo/projects/thewestrep/AGENTS.md` — Project-specific agent rules (Next.js 16 breaking changes)
-- `/home/gonzalo/projects/thewestrep/CLAUDE.md` — References AGENTS.md
-- `/home/gonzalo/projects/thewestrep/openspec/config.yaml` — SDD configuration
+- `/home/gonzalo/orca/workspaces/thewestrep/login/AGENTS.md` — Project-specific agent rules (Next.js 16 breaking changes + git-delivery auto-load)
+- `/home/gonzalo/orca/workspaces/thewestrep/login/CLAUDE.md` — References AGENTS.md
+- `/home/gonzalo/orca/workspaces/thewestrep/login/openspec/config.yaml` — SDD configuration
 - `/home/gonzalo/.config/opencode/skills/` — User skills location
+- `/home/gonzalo/orca/workspaces/thewestrep/login/skills/git-delivery/SKILL.md` — Project skill for safe gga commit/push/PR workflow
