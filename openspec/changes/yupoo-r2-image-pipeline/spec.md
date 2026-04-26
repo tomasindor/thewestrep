@@ -140,3 +140,66 @@ The system MUST represent failures in deferred variant generation cleanly. A pro
 - WHEN one or more deferred catalog variants fail to generate
 - THEN the system records a clear failure state for that promoted media work
 - AND the affected image or product is not treated as fully catalog-ready
+
+### Requirement: Imports queue uses compact navigation model
+The imports queue MUST avoid becoming an infinitely tall scrolling list when many items exist. The review interface MUST support a compact navigation model (e.g., paginated list, master-detail view, or segmented batches) that keeps the review workflow focused and fast.
+
+#### Scenario: Queue displays items in a compact, navigable format
+- GIVEN the imports queue contains many staged products (e.g., 50+ items)
+- WHEN the operator views `/admin/imports`
+- THEN the queue is presented in a compact, segmented format (not an infinitely scrolling list)
+- AND the operator can navigate between items efficiently without excessive scrolling
+
+#### Scenario: Master-detail or paginated navigation
+- GIVEN the operator needs to review multiple products
+- WHEN navigating the queue
+- THEN the UI provides clear navigation controls (pagination, next/prev, or master-detail selection)
+- AND the current position in the queue is always visible
+- AND the operator can jump to specific items or batches quickly
+
+### Requirement: Optimistic removal on promotion
+When an item is promoted, it MUST disappear from the queue immediately (optimistic removal) rather than waiting for all variant generation to finish. This keeps the queue focused on pending work and prevents re-reviewing already-promoted items.
+
+#### Scenario: Promoted item vanishes from queue immediately
+- GIVEN the operator initiates promotion for a staged product
+- WHEN the promotion request is accepted by the server
+- THEN the item is immediately removed from the visible queue
+- AND the queue UI updates without waiting for background variant generation to complete
+- AND the operator can continue reviewing remaining items without delay
+
+### Requirement: Background promotion flow
+Promotion MUST continue in the background or asynchronous flow after optimistic removal. The system MUST handle all R2 uploads and variant generation asynchronously while the operator continues working through the queue.
+
+#### Scenario: Promotion proceeds asynchronously
+- GIVEN an item has been optimistically removed from the queue
+- WHEN the promotion pipeline processes the item
+- THEN all R2 uploads and variant generation occur in the background
+- AND the operator can continue reviewing other items without blocking
+- AND the system tracks promotion progress independently of the review UI
+
+### Requirement: Failed promotion returns item to queue with error
+If promotion ultimately fails, the item MUST return to the queue with a visible operator-facing error state and reason. This ensures no promoted items are lost and operators can retry or fix issues.
+
+#### Scenario: Failed promotion re-queues item with error
+- GIVEN a promoted item's background processing fails (e.g., R2 upload error, variant generation failure)
+- WHEN the failure is detected
+- THEN the item reappears in the imports queue
+- AND the item is marked with a visible error state (e.g., "Promotion failed")
+- AND a clear, operator-readable reason is displayed (e.g., "R2 upload failed: timeout", "Variant generation error: unsupported format")
+- AND the operator can retry promotion or take corrective action
+
+### Requirement: Promotion-in-progress state is distinct
+The UI MUST communicate promotion-in-progress state separately from ordinary queued items. Items being promoted MUST be visually distinguished from items awaiting review or promotion.
+
+#### Scenario: In-progress items show distinct visual state
+- GIVEN an item is currently undergoing background promotion
+- WHEN the item appears in the queue (before optimistic removal) or returns after failure
+- THEN it displays a distinct visual indicator (e.g., spinner, progress bar, or status badge)
+- AND the state is clearly labeled as "Promoting..." or similar
+- AND the item is visually distinct from items awaiting promotion or review
+
+#### Scenario: Queue differentiates states clearly
+- GIVEN the queue contains items in various states (pending review, promoting, failed promotion)
+- WHEN the operator views the queue
+- THEN each state has a distinct visual representation
+- AND the operator can quickly identify which items need attention vs. which are processing

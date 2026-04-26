@@ -770,3 +770,47 @@
 - No tasks.md checkbox delta was applied in this focused continuation because task `6.1` was already marked complete in prior batches and this request refines promotion catalog-write parity.
 
 **Status**: Focused promotion continuation completed under strict TDD. Promotion now carries staged scraped sizes from `productData.sizes` into catalog `product_sizes` with normalization + dedupe behavior, while gracefully creating none when sizes are absent.
+
+## Files Changed (queue UX compact navigation + optimistic promotion lifecycle batch)
+| File | Action | What Was Done |
+|------|--------|---------------|
+| `tests/unit/admin-curation-ui-state.test.ts` | Modified | Added strict-TDD coverage for compact queue pagination, optimistic promotion immediate removal, failure rollback with visible operator error, and explicit queued/promoting/failed visual-state mapping. |
+| `lib/imports/admin-curation-ui-state.ts` | Modified | Added pure helpers for compact queue paging (`createQueuePager`), optimistic promotion start/finish transitions, failed-item restoration with operator-facing error metadata, and visual-state resolution. |
+| `components/admin/imports-review-client.tsx` | Modified | Implemented compact paginated sidebar navigation, optimistic removal on promote start, background promoting panel, rollback-to-queue on failure with visible error, and distinct queued/promoting/failed state badges. |
+| `tests/e2e/admin-imports.spec.ts` | Modified | Updated labels to current UI copy and extended promotion feedback assertion to cover visible failed-promotion state after optimistic rollback. |
+| `openspec/changes/yupoo-r2-image-pipeline/tasks.md` | Modified | Marked Phase 8 tasks 8.1–8.5 complete for compact queue UX + optimistic promotion lifecycle. |
+| `openspec/changes/yupoo-r2-image-pipeline/apply-progress.md` | Modified | Appended strict-TDD evidence and exact command trace for this batch. |
+
+## TDD Cycle Evidence (queue UX compact navigation + optimistic promotion lifecycle batch)
+| Task | Test File | Layer | Safety Net | RED | GREEN | TRIANGULATE | REFACTOR |
+|------|-----------|-------|------------|-----|-------|-------------|----------|
+| 8.1 | `tests/unit/admin-curation-ui-state.test.ts` | Unit | ✅ Existing UI-state suite baseline 10/10 | ✅ Written (`createQueuePager` export missing) | ✅ Passed | ✅ 2 paths (first page + clamped last page) | ✅ Clean |
+| 8.2 + 8.4 + 8.5 | `tests/unit/admin-curation-ui-state.test.ts` | Unit | ✅ Existing UI-state suite baseline | ✅ Written (`startOptimisticQueuePromotion` + `finishOptimisticQueuePromotion` exports missing) | ✅ Passed | ✅ 2 paths (immediate removal + failed restore with visible error metadata) | ✅ Clean |
+| 8.3 | `tests/unit/admin-curation-ui-state.test.ts`, `tests/e2e/admin-imports.spec.ts` | Unit + E2E | ✅ Unit safety green; ⚠️ E2E had pre-existing selector mismatch in baseline labels | ✅ Written (visual-state contract + failed badge assertion) | ✅ Passed | ✅ 3 states covered (queued/promoting/failed) | ✅ Clean |
+
+## Test Summary (queue UX compact navigation + optimistic promotion lifecycle batch)
+- **Safety Net commands**:
+  - `node --import ./tests/node-test-register.mjs --test "tests/unit/admin-curation-ui-state.test.ts" "tests/unit/app/api/admin/imports.route.test.ts"` (pass: 16/16)
+  - `node scripts/playwright-runner.mjs test tests/e2e/admin-imports.spec.ts` (pre-existing fail: metadata label mismatch in first test before this batch updates)
+- **RED command**:
+  - `node --import ./tests/node-test-register.mjs --test "tests/unit/admin-curation-ui-state.test.ts"` (failed first on missing exports: `createQueuePager`, optimistic promotion helpers, visual-state resolver)
+- **GREEN commands**:
+  - `node --import ./tests/node-test-register.mjs --test "tests/unit/admin-curation-ui-state.test.ts"` (pass: 13/13)
+  - `node --import ./tests/node-test-register.mjs --test "tests/unit/app/api/admin/imports.route.test.ts"` (pass: 6/6)
+  - `node --import ./tests/node-test-register.mjs --test "tests/unit/admin-curation-ui-state.test.ts" "tests/unit/app/api/admin/imports.route.test.ts"` (pass: 19/19)
+  - `node scripts/playwright-runner.mjs test tests/e2e/admin-imports.spec.ts` (pass: 3/3)
+  - `npm run typecheck` (pass)
+- **Intermediary verification runs executed during cycle**:
+  - `node --import ./tests/node-test-register.mjs --test "tests/unit/admin-curation-ui-state.test.ts" "tests/unit/app/api/admin/imports.route.test.ts"` (pass)
+  - `node scripts/playwright-runner.mjs test tests/e2e/admin-imports.spec.ts` (failed once on strict text ambiguity for blocked reason assertion)
+  - `npm run typecheck` (failed once on test type narrowing: `promotionError` property missing on inferred literal type)
+  - `node --import ./tests/node-test-register.mjs --test "tests/unit/admin-curation-ui-state.test.ts" "tests/unit/app/api/admin/imports.route.test.ts"` (pass)
+  - `node scripts/playwright-runner.mjs test tests/e2e/admin-imports.spec.ts` (failed once on strict text ambiguity for `promoción fallida` assertion)
+  - `npm run typecheck` (pass)
+- **Result**: Targeted unit suites, admin imports E2E, and typecheck are green for this batch.
+- **Layers used**: Unit, E2E, Type gate
+
+## Issues / Deviations (queue UX compact navigation + optimistic promotion lifecycle batch)
+- `tasks.md` task 8.5 requested a dedicated file `tests/unit/lib/imports/promotion-optimistic.test.ts`; this batch implemented the same required assertions in the existing queue-UI pure-helper suite `tests/unit/admin-curation-ui-state.test.ts` to stay aligned with current test architecture and avoid duplicated contracts.
+
+**Status**: Requested batch implemented under strict TDD. `/admin/imports` now uses compact paginated queue navigation, removes items optimistically on promotion start, keeps promotion work asynchronous from the UI perspective with a dedicated in-progress panel, restores failed promotions back into the queue with explicit operator-facing error, and clearly differentiates queued vs promoting vs failed visual states.

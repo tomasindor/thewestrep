@@ -64,11 +64,19 @@
 - [x] 7.5 Add safe staging-only cleanup: implement delete-only cleanup for staging tables that only removes staged imports WITHOUT touching promoted catalog items. Add confirmation dialog in UI to prevent accidental deletion of in-progress work.
 - [x] 7.6 Add "clear imports queue" action to `/admin/imports` that allows operators to batch-delete all staged items in one operation with explicit confirmation dialog.
 
-## Phase 8: Verification — final regression testing
+## Phase 8: Queue UX — compact queue + optimistic promotion
 
-- [ ] 8.1 Run full test suite to confirm no regressions across all phases.
-- [ ] 8.2 Manual verification: import a Yupoo URL and confirm preview loads without 404s.
-- [ ] 8.3 Verify staging cleanup does not affect promoted products in catalog.
+- [x] 8.1 Add pagination to the queue sidebar list in `components/admin/imports-review-client.tsx`: implement a "Ver más" button or infinite scroll with batch loading (e.g., load 20 items at a time) to avoid rendering hundreds of items at once.
+- [x] 8.2 Implement optimistic queue removal on promote: immediately remove promoted items from the local `items` state when promotion starts, before server response confirm.
+- [x] 8.3 Add background promotion state handling: track per-item promotion status (`promoting`, `promoted`, `failed`) and display a subtle indicator (spinner or checkmark) while promotion runs in background.
+- [x] 8.4 Implement queue rollback on promotion failure: when promotion fails, re-add the item to the queue with visible error state and show explicit error reason in the UI.
+- [x] 8.5 Add unit tests for optimistic promotion behavior: `tests/unit/lib/imports/promotion-optimistic.test.ts` asserting: (a) promoted items are removed immediately from UI, (b) failed promotions restore items to queue, (c) error messages are visible.
+
+## Phase 9: Verification — final regression testing
+
+- [ ] 9.1 Run full test suite to confirm no regressions across all phases.
+- [ ] 9.2 Manual verification: import a Yupoo URL and confirm preview loads without 404s.
+- [ ] 9.3 Verify staging cleanup does not affect promoted products in catalog.
 
 ## Summary
 
@@ -82,8 +90,9 @@
 | 5 | 4 | Eligibility + block reasons |
 | 6 | 3 | Catalog integration |
 | 7 | 6 | Cleanup + verification |
-| 8 | 3 | Final regression testing |
-| **Total** | **37** | |
+| 8 | 5 | Queue UX: pagination + optimistic promotion |
+| 9 | 3 | Final regression testing |
+| **Total** | **40** | |
 
 ## Implementation Order
 
