@@ -12,10 +12,21 @@ export const metadata: Metadata = createPageMetadata({
   keywords: ["tienda streetwear", "ropa urbana", "catálogo online"],
 });
 
-export default function Home() {
+interface HomePageRouteProps {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}
+
+function isHeroPromoPreviewEnabled(value: string | string[] | undefined) {
+  const normalizedValue = Array.isArray(value) ? value[0] : value;
+  return normalizedValue === "1" || normalizedValue === "true";
+}
+
+export default async function Home({ searchParams }: HomePageRouteProps) {
+  const resolvedSearchParams = await searchParams;
+
   return (
     <main className="flex-1">
-      <HomePage />
+      <HomePage heroPromoPreview={isHeroPromoPreviewEnabled(resolvedSearchParams.heroPromoPreview)} />
     </main>
   );
 }

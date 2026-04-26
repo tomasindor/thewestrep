@@ -14,6 +14,15 @@ export interface CloudinaryConfig {
   productFolder: string;
 }
 
+export interface R2Config {
+  accountId: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+  bucketName: string;
+  endpoint: string;
+  publicBaseUrl: string | null;
+}
+
 export function getAuthSecret() {
   return readEnv("AUTH_SECRET") ?? readEnv("NEXTAUTH_SECRET");
 }
@@ -100,4 +109,28 @@ export function getCloudinaryConfig(): CloudinaryConfig | null {
 
 export function isCloudinaryConfigured() {
   return getCloudinaryConfig() !== null;
+}
+
+export function getR2Config(): R2Config | null {
+  const accountId = readEnv("R2_ACCOUNT_ID");
+  const accessKeyId = readEnv("R2_ACCESS_KEY_ID");
+  const secretAccessKey = readEnv("R2_SECRET_ACCESS_KEY");
+  const bucketName = readEnv("R2_BUCKET_NAME");
+
+  if (!accountId || !accessKeyId || !secretAccessKey || !bucketName) {
+    return null;
+  }
+
+  return {
+    accountId,
+    accessKeyId,
+    secretAccessKey,
+    bucketName,
+    endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
+    publicBaseUrl: readEnv("R2_PUBLIC_BASE_URL"),
+  };
+}
+
+export function isR2Configured() {
+  return getR2Config() !== null;
 }

@@ -6,9 +6,9 @@ import type { CheckoutAccessCustomerAuthState } from "@/components/cart/checkout
 import type { CustomerProfileSnapshot } from "@/lib/auth/customer-profile";
 import { useCart } from "@/components/cart/cart-provider";
 import {
+  buildOrderPricingSummary,
   getFulfillmentCopy,
   getSavedShippingSummary,
-  getPriceAmount,
 } from "@/lib/orders/checkout.shared";
 import { hasEncargueItems, getCorreoArgentinoFeeTotal } from "@/lib/cart/assisted-orders";
 
@@ -34,27 +34,22 @@ export interface CheckoutControllerReturn {
   submitError: string | null;
   isSubmittingOrder: boolean;
   submittedOrder: SubmittedOrder | null;
-  acceptedAssistedOrderSignature: string;
-  checkedAssistedOrderSignature: string;
 
   // Computed
   subtotal: number;
+  comboDiscountAmountArs: number;
   shippingFee: number;
   correoArgentinoFeeTotal: number;
   total: number;
   hasRequiredFields: boolean;
   hasEncargueOrder: boolean;
   hasResolvedAccess: boolean;
-  assistedOrderSignature: string;
   savedShippingSummary: string;
-  requiresAssistedOrderAcknowledgement: boolean;
   isSubmitted: boolean;
 
   // Callbacks
   placeOrder: () => void;
   markTriedSubmit: () => void;
-  acceptAssistedOrder: () => void;
-  checkAssistedOrderTerms: (checked: boolean, signature: string) => void;
 }
 
 export function useCheckoutController(
@@ -63,8 +58,6 @@ export function useCheckoutController(
 ): CheckoutControllerReturn {
   const { customer, items, updateCustomer } = useCart();
   const [hasTriedSubmit, setHasTriedSubmit] = useState(false);
-  const [acceptedAssistedOrderSignature, setAcceptedAssistedOrderSignature] = useState("");
-  const [checkedAssistedOrderSignature, setCheckedAssistedOrderSignature] = useState("");
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submittedOrder, setSubmittedOrder] = useState<SubmittedOrder | null>(null);
   const [isSubmittingOrder, startSubmittingOrder] = useTransition();
@@ -72,28 +65,26 @@ export function useCheckoutController(
 
   const hasEncargueOrder = hasEncargueItems(items);
   const correoArgentinoFeeTotal = getCorreoArgentinoFeeTotal(items);
-  const assistedOrderSignature = useMemo(
-    () =>
-      items
-        .filter((item) => item.availability === "encargue")
-        .map((item) => item.id)
-        .join("|"),
-    [items],
-  );
 
-  const subtotal = useMemo(
-    () => items.reduce((total, item) => total + getPriceAmount(item.priceDisplay) * item.quantity, 0),
-    [items],
+  const pricingPreview = useMemo(
+    () => buildOrderPricingSummary({
+      customer: {
+        ...customer,
+        checkoutMode: customer.checkoutMode === "account" ? "account" : "guest",
+        fulfillment: customer.fulfillment || "envio-caba-gba",
+      },
+      items,
+    }),
+    [customer, items],
   );
+  const subtotal = pricingPreview.subtotalAmountArs;
+  const comboDiscountAmountArs = pricingPreview.comboDiscountAmountArs;
   const shippingFee = getFulfillmentCopy(customer.fulfillment)?.fee ?? 0;
-  const total = subtotal + shippingFee + correoArgentinoFeeTotal;
+  const total = subtotal - comboDiscountAmountArs + shippingFee + correoArgentinoFeeTotal;
   const requiredLocation = customer.location.trim();
   const hasRequiredFields = Boolean(
     customer.name.trim() && customer.phone.trim() && customer.email.trim() && customer.fulfillment && requiredLocation,
   );
-  const hasAcceptedAssistedOrderTerms = !hasEncargueOrder || acceptedAssistedOrderSignature === assistedOrderSignature;
-  const hasCheckedAssistedOrderTerms = checkedAssistedOrderSignature === assistedOrderSignature;
-  const requiresAssistedOrderAcknowledgement = hasEncargueOrder && !hasAcceptedAssistedOrderTerms;
   const isSubmitted = Boolean(submittedOrder);
   const authIdentityKey = customerAuth ? `${customerAuth.authProvider}:${customerAuth.email}` : null;
   const hasResolvedAccess = customer.checkoutMode === "guest" || Boolean(customerAuth);
@@ -230,7 +221,7 @@ export function useCheckoutController(
   const placeOrder = () => {
     setSubmitError(null);
 
-    if (!hasRequiredFields || requiresAssistedOrderAcknowledgement) {
+    if (!hasRequiredFields) {
       return;
     }
 
@@ -278,40 +269,27 @@ export function useCheckoutController(
     setHasTriedSubmit(true);
   };
 
-  const acceptAssistedOrder = () => {
-    setAcceptedAssistedOrderSignature(assistedOrderSignature);
-  };
-
-  const checkAssistedOrderTerms = (checked: boolean, signature: string) => {
-    setCheckedAssistedOrderSignature(checked ? signature : "");
-  };
-
   return {
     // State
     hasTriedSubmit,
     submitError,
     isSubmittingOrder,
     submittedOrder,
-    acceptedAssistedOrderSignature,
-    checkedAssistedOrderSignature,
 
     // Computed
     subtotal,
+    comboDiscountAmountArs,
     shippingFee,
     correoArgentinoFeeTotal,
     total,
     hasRequiredFields,
     hasEncargueOrder,
     hasResolvedAccess,
-    assistedOrderSignature,
     savedShippingSummary,
-    requiresAssistedOrderAcknowledgement,
     isSubmitted,
 
     // Callbacks
     placeOrder,
     markTriedSubmit,
-    acceptAssistedOrder,
-    checkAssistedOrderTerms,
   };
 }

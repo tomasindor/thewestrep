@@ -70,6 +70,20 @@ test("builds Mercado Pago preference body with order items and fees", () => {
           availabilityLabel: "Encargue",
           priceDisplay: "$ 15.000",
           quantity: 1,
+          categorySlug: "buzos",
+          comboGroup: "look-01",
+        },
+        {
+          id: "sku-3::gris::l",
+          productId: "sku-3",
+          productSlug: "pantalon-3",
+          productName: "Pantalón 3",
+          availability: "encargue",
+          availabilityLabel: "Encargue",
+          priceDisplay: "$ 10.000",
+          quantity: 1,
+          categorySlug: "pantalones",
+          comboGroup: "look-01",
         },
       ],
     },
@@ -80,15 +94,22 @@ test("builds Mercado Pago preference body with order items and fees", () => {
   assert.equal(body.payer?.email, "gonza@correo.com");
   assert.equal(body.payer?.name, "Gonzalo");
   assert.equal(body.payer?.surname, "Pérez");
-  assert.equal(body.items.length, 4);
-  assert.deepEqual(body.items.at(-2), {
+  assert.equal(body.items.length, 6);
+  assert.deepEqual(body.items.find((item) => item.id === "combo-discount"), {
+    id: "combo-discount",
+    title: "Descuento combo",
+    quantity: 1,
+    unit_price: -3000,
+    currency_id: "ARS",
+  });
+  assert.deepEqual(body.items.find((item) => item.id === "shipping-envio-caba-gba"), {
     id: "shipping-envio-caba-gba",
     title: "Entrega puerta a puerta CABA/GBA",
     quantity: 1,
     unit_price: 6500,
     currency_id: "ARS",
   });
-  assert.deepEqual(body.items.at(-1), {
+  assert.deepEqual(body.items.find((item) => item.id === "correo-argentino-assist"), {
     id: "correo-argentino-assist",
     title: "Gestión Correo Argentino",
     quantity: 1,

@@ -3,16 +3,17 @@
  * 
  * Uso: npx tsx scripts/import-yupoo.ts
  * Limitar páginas: npx tsx scripts/import-yupoo.ts --pages=1
+ * Limitar productos: npx tsx scripts/import-yupoo.ts --pages=1 --limit=10
  */
 
 import * as cheerio from "cheerio";
 import { getDb } from "@/lib/db/core";
-import { brands, categories, products, productImages, productSizes, productVariants } from "@/lib/db/schema";
+import { brands, categories } from "@/lib/db/schema";
 import { createId, slugify } from "@/lib/utils";
-import { buildProductWhatsappCta, buildProductWhatsappMessage } from "@/lib/catalog/whatsapp";
-import { reorderLikelySizeGuideImageUrls } from "@/lib/catalog/size-guides";
 import { loadCliEnv } from "@/lib/env/load-cli";
 import { canonicalizeYupooImageCandidates, getYupooCanonicalKey } from "@/lib/yupoo-core";
+import { buildBulkIngestionInput, ingestYupooSource } from "@/lib/imports/ingestion";
+import { createBulkIngestionDependencies } from "@/lib/imports/bulk-r2-wiring";
 
 // =====================================================
 // MAPA DE MARCAS CAMUFLADAS → NOMBRES REALES
@@ -437,32 +438,32 @@ function extractYupooAlbumDataFromHtml(sourceUrl: string, html: string) {
     pushCandidate(match);
   }
 
-  // 3. Deduplicar variantes (small/big/medium/original) manteniendo una por familia
-  const deduped = canonicalizeYupooImageCandidates(collected);
+// 3. Deduplicar variantes (small/big/medium/original) manteniendo una por familia
+const deduped = canonicalizeYupooImageCandidates(collected);
 
-  // 4. Construir array ordenado: preview → regulares → PNG/medidas
-  const images: string[] = [];
-  const usedUrls = new Set<string>();
+// 4. Construir array ordenado: preview → regulares → PNG/medidas
+const images: string[] = [];
+const usedUrls = new Set<string>();
 
-  if (previewImage) {
-    const previewKey = getYupooCanonicalKey(previewImage);
-    const bestPreview = deduped.find((url) => {
-      try {
-        return getYupooCanonicalKey(url) === previewKey;
-      } catch {
-        return false;
-      }
-    }) ?? previewImage;
+if (previewImage) {
+const previewKey = getYupooCanonicalKey(previewImage);
+const bestPreview = deduped.find((url) => {
+try {
+return getYupooCanonicalKey(url) === previewKey;
+} catch {
+return false;
+}
+}) ?? previewImage;
 
-    images.push(bestPreview);
-    usedUrls.add(bestPreview);
-  }
+images.push(bestPreview);
+usedUrls.add(bestPreview);
+}
 
-  const remaining = deduped.filter((url) => !usedUrls.has(url));
-  const regular = remaining.filter((url) => !shouldPushImageToEnd(url));
-  const trailing = remaining.filter((url) => shouldPushImageToEnd(url));
+const remaining = deduped.filter((url) => !usedUrls.has(url));
+const regular = remaining.filter((url) => !shouldPushImageToEnd(url));
+const trailing = remaining.filter((url) => shouldPushImageToEnd(url));
 
-  images.push(...regular, ...trailing);
+images.push(...regular, ...trailing);
 
   const weidianUrl = extractWeidianUrlFromAlbumHtml(html);
 
@@ -814,14 +815,21 @@ interface ScrapedAlbum {
   href: string;
   albumId: string;
   price: number | null;
+  detectedPricesYuan: number[];
   rawName: string;
 }
 
-function parseAlbumFromTitle(title: string): { rawName: string; price: number | null } {
-  // Extraer primer precio del título
-  const priceMatch = title.match(/￥\s*(\d+)/);
-  const price = priceMatch ? parseInt(priceMatch[1], 10) : null;
-  return { rawName: title, price };
+function convertYuanToArs(priceYuan: number) {
+  return Math.round(priceYuan * 200 + 50000);
+}
+
+function parseAlbumFromTitle(title: string): { rawName: string; price: number | null; detectedPricesYuan: number[] } {
+  const detectedPricesYuan = Array.from(title.matchAll(/[¥￥]\s*(\d+)/g))
+    .map((match) => Number.parseInt(match[1] ?? "", 10))
+    .filter((value) => Number.isFinite(value) && value > 0)
+    .filter((value, index, values) => values.indexOf(value) === index);
+  const price = detectedPricesYuan[0] ?? null;
+  return { rawName: title, price, detectedPricesYuan };
 }
 
 async function sleep(ms: number) {
@@ -935,11 +943,7 @@ async function processAlbum(
     // Si el nombre quedó vacío, usar "Marca + Categoría"
     const productName = cleanedName || `${brandName} ${garmentType}`;
 
-    // 3. Buscar/crear marca y categoría
-    const brand = await findOrCreateBrand(db, brandName);
-    const category = await findOrCreateCategory(db, garmentType);
-
-    // 4. Extraer imágenes
+    // 3. Extraer imágenes
     const albumSlug = album.href.split("?")[0];
     const albumUrl = `${YUPOO_BASE}${albumSlug}?uid=1`;
     const albumData = await extractYupooAlbumData(albumUrl);
@@ -948,7 +952,7 @@ async function processAlbum(
       return { success: false, error: "Sin imágenes" };
     }
 
-    // 5. Extraer link de Weidian y obtener talles/variantes
+    // 4. Extraer link de Weidian y obtener talles/variantes
     let sizes: string[] = [];
     let variants: string[] = [];
 
@@ -958,74 +962,38 @@ async function processAlbum(
       variants = weidianData.variants;
     }
 
-    // 6. Crear producto
-    const productId = createId("product");
+    // 5. Normalizar datos económicos/base para staging
     const slug = `${slugify(productName)}-${album.albumId}`;
     const priceYuan = album.price ?? 0;
-    const priceArs = priceYuan > 0 ? priceYuan * 200 + 50000 : 0;
+    const detectedPrices = album.detectedPricesYuan.map(convertYuanToArs);
+    const priceArs = detectedPrices[0] ?? (priceYuan > 0 ? convertYuanToArs(priceYuan) : 0);
+    const hasTwoTitlePrices = album.detectedPricesYuan.length === 2;
 
-    await db.insert(products).values({
-      id: productId,
-      type: "encargue",
-      name: productName,
-      slug,
-      brandId: brand.id,
-      categoryId: category.id,
-      priceArs,
-      description: "",
-      availabilityNote: "",
-      whatsappCtaLabel: buildProductWhatsappCta("encargue"),
-      whatsappMessage: buildProductWhatsappMessage({
+    // 6. Ingestar a staging (shared pipeline)
+    const ingestionInput = buildBulkIngestionInput({
+      albumUrl,
+      albumHref: album.href,
+      imageUrls: albumData.images,
+      productData: {
+        albumId: album.albumId,
+        rawName: album.rawName,
         productName,
-        availability: "encargue",
-      }),
-      state: "draft",
-      sourceUrl: albumUrl,
-      createdAt: new Date(),
-      updatedAt: new Date(),
+        slug,
+        brandName,
+        categoryName: garmentType,
+        sourceUrl: albumUrl,
+        weidianUrl: albumData.weidianUrl,
+        sizes,
+        variants,
+        priceYuan,
+        priceArs,
+        detectedPrices,
+        importerDetectedTwoTitlePrices: hasTwoTitlePrices,
+        detectedPricesSource: hasTwoTitlePrices ? "title" : undefined,
+      },
     });
 
-    const orderedImageUrls = reorderLikelySizeGuideImageUrls(albumData.images, { sourcePageUrl: albumUrl });
-
-    // 7. Insertar imágenes (ordenadas: principal primero, medidas al final)
-    await db.insert(productImages).values(
-      orderedImageUrls.map((url, index) => ({
-        id: createId("image"),
-        productId,
-        url,
-        sourceUrl: url,
-        alt: `${productName} ${index + 1}`,
-        position: index,
-        source: "yupoo" as const,
-        createdAt: new Date(),
-      })),
-    );
-
-    // 8. Insertar talles
-    if (sizes.length > 0) {
-      await db.insert(productSizes).values(
-        sizes.map((label, index) => ({
-          id: createId("size"),
-          productId,
-          label,
-          position: index,
-          createdAt: new Date(),
-        })),
-      );
-    }
-
-    // 9. Insertar variantes (colores traducidos)
-    if (variants.length > 0) {
-      await db.insert(productVariants).values(
-        variants.map((label, index) => ({
-          id: createId("variant"),
-          productId,
-          label,
-          position: index,
-          createdAt: new Date(),
-        })),
-      );
-    }
+    await ingestYupooSource(ingestionInput, createBulkIngestionDependencies(db));
 
     return { success: true, brand: brandName, category: garmentType };
   } catch (error) {
@@ -1050,7 +1018,9 @@ async function main() {
 
   const totalAvailablePages = await getTotalPages();
   const pagesArg = process.argv.find((arg) => arg.startsWith("--pages="));
+  const limitArg = process.argv.find((arg) => arg.startsWith("--limit="));
   const maxPages = pagesArg ? parseInt(pagesArg.split("=")[1], 10) : totalAvailablePages;
+  const maxProducts = limitArg ? parseInt(limitArg.split("=")[1], 10) : null;
   const totalPages = Math.min(maxPages, totalAvailablePages);
 
   console.log(`📄 Páginas: ${totalPages}/${totalAvailablePages}\n`);
@@ -1085,15 +1055,19 @@ async function main() {
     return !esInfo && !esCategoria && !esCalzado && album.title.length > 5;
   });
 
-  console.log(`📋 Para importar: ${albumesValidos.length}\n`);
+  const albumesAImportar = maxProducts && Number.isFinite(maxProducts)
+    ? albumesValidos.slice(0, Math.max(0, maxProducts))
+    : albumesValidos;
+
+  console.log(`📋 Para importar: ${albumesAImportar.length}${maxProducts ? ` (limitado a ${albumesAImportar.length})` : ""}\n`);
 
   // Procesar
   let ok = 0, err = 0;
   const brandCounts = new Map<string, number>();
   const errors: Array<{ album: string; error: string }> = [];
 
-  for (let i = 0; i < albumesValidos.length; i += BATCH_SIZE) {
-    const batch = albumesValidos.slice(i, i + BATCH_SIZE);
+  for (let i = 0; i < albumesAImportar.length; i += BATCH_SIZE) {
+    const batch = albumesAImportar.slice(i, i + BATCH_SIZE);
     const results = await Promise.all(batch.map(album => processAlbum(album, db)));
 
     for (let j = 0; j < results.length; j++) {
@@ -1107,10 +1081,10 @@ async function main() {
       }
     }
 
-    const progress = Math.min(i + BATCH_SIZE, albumesValidos.length);
-    console.log(`⚙️  ${progress}/${albumesValidos.length} - ✅ ${ok} - ❌ ${err}`);
+    const progress = Math.min(i + BATCH_SIZE, albumesAImportar.length);
+    console.log(`⚙️  ${progress}/${albumesAImportar.length} - ✅ ${ok} - ❌ ${err}`);
 
-    if (i + BATCH_SIZE < albumesValidos.length) await sleep(DELAY_MS);
+    if (i + BATCH_SIZE < albumesAImportar.length) await sleep(DELAY_MS);
   }
 
   // Resumen por marca

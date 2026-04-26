@@ -4,13 +4,18 @@ import Link from "next/link";
 import { CatalogFilters } from "@/components/catalog/catalog-filters";
 import { CatalogHeader } from "@/components/catalog/catalog-header";
 import { InfiniteProductGrid } from "@/components/catalog/infinite-product-grid";
+import { PromoBanner } from "@/components/catalog/promo-banner";
 import { PublicFooter } from "@/components/layout/public-footer";
 import { Container } from "@/components/ui/container";
 import {
+  applyPromoPresetFilters,
   getCatalogFilterGroups,
   getCatalogFiltersFromSearchParams,
   getCatalogPath,
   getCatalogProducts,
+  getPromoBannerForCatalogListing,
+  resolvePromoPreset,
+  resolvePromoPresetCategoryIds,
   type ProductAvailability,
 } from "@/lib/catalog";
 import { createPageMetadata } from "@/lib/seo";
@@ -42,20 +47,24 @@ const listingContent: Record<
   },
   encargue: {
     title: `Encargue internacional asistido | ${siteConfig.title}`,
-    description: "Catálogo de encargue internacional asistido de thewestrep para elegir el producto y avanzar con un proceso simple sin trámites.",
+    description:
+      "Catálogo de encargue internacional asistido de thewestrep: elegí el producto, nosotros hacemos la importación y despachamos localmente por Correo Argentino.",
     eyebrow: "Encargue internacional asistido",
-    heading: "ELEGÍ EL PRODUCTO Y AVANZÁ SIN TRÁMITES.",
+    heading: "ELEGÍ EL PRODUCTO, NOSOTROS NOS OCUPAMOS DE TODO.",
     intro:
-      "Filtrá por marca o prenda, encontrá tu referencia y seguimos con un encargue internacional asistido donde nosotros hacemos la importación y despachamos localmente.",
-    statsCopy: "Selección pensada para que encarguemos la importación y luego despachamos localmente desde Argentina.",
+      "Filtrá por marca o prenda, encontrá tu referencia y avanzá sin trámites: nosotros hacemos la importación y despachamos localmente por Correo Argentino.",
+    statsCopy:
+      "Plazo estimado: 30 a 60 días. Puede variar según aduana, transporte aéreo y correo local. No gestionás nada por tu cuenta.",
     emptyTitle: "No hay encargues para esta categoría.",
-    emptyDescription: "Probá otra búsqueda, cambiá el orden o limpiá los filtros para volver a ver todos los encargues disponibles.",
+    emptyDescription:
+      "Probá otra búsqueda, cambiá el orden o limpiá los filtros para volver a ver todos los encargues disponibles.",
   },
 };
 
 interface CatalogListingPageProps {
   availability: ProductAvailability;
   searchParams: Record<string, string | string[] | undefined>;
+  promoId?: string;
 }
 
 export function getCatalogListingMetadata(availability: ProductAvailability): Metadata {
@@ -69,11 +78,19 @@ export function getCatalogListingMetadata(availability: ProductAvailability): Me
   });
 }
 
-export async function CatalogListingPage({ availability, searchParams }: CatalogListingPageProps) {
+export async function CatalogListingPage({ availability, searchParams, promoId }: CatalogListingPageProps) {
   const content = listingContent[availability];
   const activeFilters = getCatalogFiltersFromSearchParams(searchParams);
+  const candidatePromoId = promoId ?? activeFilters.promoId;
+  const resolvedPreset = availability === "encargue" ? await resolvePromoPreset(candidatePromoId) : null;
+  const promoCategoryIds = resolvedPreset ? await resolvePromoPresetCategoryIds(resolvedPreset) : [];
+  const promoPreset = resolvedPreset ? { ...resolvedPreset, categoryIds: promoCategoryIds } : null;
+  const promoBanner = getPromoBannerForCatalogListing(availability, promoPreset);
   const baseFilters = { availability } as const;
-  const filters = { ...activeFilters, ...baseFilters };
+  const filters = {
+    ...applyPromoPresetFilters(activeFilters, promoPreset),
+    ...baseFilters,
+  };
   const [products, totalProducts, filterGroups] = await Promise.all([
     getCatalogProducts(filters),
     getCatalogProducts(baseFilters),
@@ -84,6 +101,8 @@ export async function CatalogListingPage({ availability, searchParams }: Catalog
     availability,
     activeFilters.brandId ?? "all-brands",
     activeFilters.categoryId ?? "all-categories",
+    filters.categoryIds?.join(",") ?? "promo-off",
+    filters.promoId ?? "no-promo",
     activeFilters.query ?? "all-products",
     activeFilters.sort ?? "alpha-asc",
   ].join(":");
@@ -95,6 +114,14 @@ export async function CatalogListingPage({ availability, searchParams }: Catalog
 
         <section className="py-12 sm:py-18">
           <Container className="space-y-8">
+            {promoBanner ? (
+              <PromoBanner
+                title={promoBanner.title}
+                rules={promoBanner.rules}
+                disclosure={promoBanner.disclosure}
+              />
+            ) : null}
+
             <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
               <div className="space-y-4">
                 <p className="font-display text-sm tracking-[0.45em] text-[#f2d4dd]/78 uppercase">

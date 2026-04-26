@@ -1,11 +1,15 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect } from "react";
 
+import { trackComboEvent } from "@/lib/analytics/combo-events";
 import { useCart } from "@/components/cart/cart-provider";
 import { SmartImage } from "@/components/ui/smart-image";
 import { getCorreoArgentinoFeeTotal, hasEncargueItems } from "@/lib/cart/assisted-orders";
 import { getProductImageUrlForContext } from "@/lib/media/product-images";
+import { getPriceAmount } from "@/lib/orders/checkout.shared";
+import { calculateComboPricing } from "@/lib/pricing/encargue-combos-core";
 import { compactGhostCtaClassName, solidCtaClassName } from "@/lib/ui";
 import { formatArs } from "@/lib/utils";
 
@@ -25,6 +29,37 @@ export function CartDrawer() {
   const { closeCart, clearCart, isHydrated, isOpen, itemCount, items, removeItem, updateQuantity } = useCart();
   const hasEncargueOrder = hasEncargueItems(items);
   const correoArgentinoFeeTotal = getCorreoArgentinoFeeTotal(items);
+  const comboPricing = calculateComboPricing(items.map((item) => ({
+    lineId: item.id,
+    productId: item.productId,
+    productSlug: item.productSlug,
+    productName: item.productName,
+    priceArs: getPriceAmount(item.priceDisplay),
+    quantity: item.quantity,
+    comboGroup: item.comboGroup,
+    comboPriority: item.comboPriority,
+    categorySlug: item.categorySlug,
+  })));
+  const comboTriggerLines = Array.from(new Set((comboPricing?.appliedDiscounts ?? [])
+    .map((discount) => {
+      if (!discount.pairedWithProductName) {
+        return null;
+      }
+
+      return `Combo: ${discount.productName} + ${discount.pairedWithProductName}`;
+    })
+    .filter((line): line is string => Boolean(line))));
+
+  useEffect(() => {
+    if (!comboPricing?.comboDiscount) {
+      return;
+    }
+
+    trackComboEvent("combo_discount_applied", {
+      comboDiscountAmountArs: comboPricing.comboDiscount,
+      appliedDiscountCount: comboPricing.appliedDiscounts.length,
+    });
+  }, [comboPricing?.appliedDiscounts.length, comboPricing?.comboDiscount]);
 
   const handleClose = () => {
     closeCart();
@@ -95,6 +130,16 @@ export function CartDrawer() {
                     Encargue asistido: Correo Argentino suma {correoArgentinoFeeTotal === 0 ? "-" : formatArs(correoArgentinoFeeTotal)} por pedido.
                   </p>
                 ) : null}
+                {comboPricing?.comboDiscount ? (
+                  <p className="mt-1 text-xs leading-5 text-emerald-200">
+                    Descuento combo: -{formatArs(comboPricing.comboDiscount)}
+                  </p>
+                ) : null}
+                {comboTriggerLines.map((line) => (
+                  <p key={line} className="mt-1 text-xs leading-5 text-[#f2d4dd]/88">
+                    {line}
+                  </p>
+                ))}
               </div>
               <Link href="/login" onClick={handleClose} className="text-sm text-slate-300 transition hover:text-white">
                 Resolver acceso

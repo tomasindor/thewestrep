@@ -152,3 +152,58 @@ test("preserves existing profile fields when checkout already has richer profile
   assert.equal(patch.shippingAddressLine1, "Dirección Guardada");
   assert.equal(patch.shippingDeliveryNotes, "Notas guardadas");
 });
+
+test("applies combo pricing in checkout summary when top+bottom pair exists", () => {
+  const payload = checkoutOrderPayloadSchema.parse({
+    ...validPayload,
+    items: [
+      {
+        id: "combo-top",
+        productId: "product-top",
+        productSlug: "buzo-combo",
+        productName: "Buzo Combo",
+        availability: "encargue",
+        availabilityLabel: "Encargue",
+        priceDisplay: "$ 50.000",
+        quantity: 1,
+        categorySlug: "buzos",
+        comboGroup: "winter-2026",
+      },
+      {
+        id: "combo-bottom",
+        productId: "product-bottom",
+        productSlug: "pantalon-combo",
+        productName: "Pantalón Combo",
+        availability: "encargue",
+        availabilityLabel: "Encargue",
+        priceDisplay: "$ 40.000",
+        quantity: 1,
+        categorySlug: "pantalones",
+        comboGroup: "winter-2026",
+      },
+    ],
+  });
+
+  const pricing = buildOrderPricingSummary(payload);
+
+  assert.equal(pricing.subtotalAmountArs, 90_000);
+  assert.equal(pricing.comboDiscountAmountArs, 12_000);
+  assert.equal(pricing.totalAmountArs, 92_100);
+  assert.equal(pricing.comboDiscountByLineId["combo-bottom"]?.amountArs, 12_000);
+});
+
+test("requires pairedWithProductId when comboDiscount metadata is provided", () => {
+  assert.throws(
+    () => checkoutOrderPayloadSchema.parse({
+      ...validPayload,
+      items: [{
+        ...validPayload.items[0],
+        comboDiscount: {
+          amountArs: 3000,
+          reason: "Combo look",
+        },
+      }],
+    }),
+    /pairedWithProductId/i,
+  );
+});

@@ -29,7 +29,13 @@ export interface CartItem {
   };
   availability: ProductAvailability;
   availabilityLabel: string;
+  categorySlug?: string;
   priceDisplay: string;
+  comboEligible?: boolean;
+  comboGroup?: string;
+  comboPriority?: number;
+  comboSourceKey?: string;
+  comboScore?: number;
   quantity: number;
   variantLabel?: string;
   sizeLabel?: string;
@@ -48,7 +54,13 @@ export interface AddCartItemInput {
   };
   availability: ProductAvailability;
   availabilityLabel: string;
+  categorySlug?: string;
   priceDisplay: string;
+  comboEligible?: boolean;
+  comboGroup?: string;
+  comboPriority?: number;
+  comboSourceKey?: string;
+  comboScore?: number;
   variantLabel?: string;
   sizeLabel?: string;
 }

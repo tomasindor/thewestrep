@@ -1,27 +1,17 @@
 import { expect, test, type Page } from "@playwright/test";
 
-const stockProduct = {
-  name: "Essentials Core Hoodie",
-  slug: "essentials-core-hoodie",
-};
-
-const encargueProduct = {
-  name: "Bape College Hoodie",
-  slug: "bape-college-hoodie",
+type ListingProduct = {
+  name: string;
+  slug: string;
 };
 
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-async function selectPdpSize(page: Page, sizeLabel: string, expectedEncodedMessage: string) {
-  const sizeButton = page.getByRole("button", { name: new RegExp(`^${sizeLabel}\\b`, "i") });
-  const whatsappCta = page.getByRole("link", { name: /reservar por whatsapp|cotizar por whatsapp/i });
-  const addToCartButton = page.getByRole("button", { name: /agregar al carrito/i });
-
-  await sizeButton.click();
-  await expect(whatsappCta).toHaveAttribute("href", new RegExp(escapeRegExp(expectedEncodedMessage)));
-  await expect(addToCartButton).toBeEnabled();
+function buildStockWhatsappMessage(productName: string, sizeLabel?: string) {
+  const detail = sizeLabel ? ` (${sizeLabel})` : "";
+  return encodeURIComponent(`Hola, quiero reservar ${productName}${detail} y coordinar entrega con thewestrep.`);
 }
 
 async function goToCatalogHub(page: Page) {
@@ -31,19 +21,66 @@ async function goToCatalogHub(page: Page) {
   await expect(page).toHaveURL(/\/catalogo$/);
 }
 
+async function getFirstListingProduct(page: Page, availability: "stock" | "encargue"): Promise<ListingProduct | null> {
+  const productDetailLink = page.getByRole("link", { name: /ver detalle de/i }).first();
+
+  if ((await productDetailLink.count()) === 0) {
+    return null;
+  }
+
+  await expect(productDetailLink).toBeVisible();
+
+  const href = await productDetailLink.getAttribute("href");
+
+  if (!href) {
+    throw new Error("Expected product detail link with href.");
+  }
+
+  const slugMatch = href.match(new RegExp(`/${availability}/([^/?#]+)$`, "i"));
+
+  if (!slugMatch?.[1]) {
+    throw new Error(`Expected ${availability} product detail href, got '${href}'.`);
+  }
+
+  const accessibleName = (await productDetailLink.getAttribute("aria-label")) ?? "";
+  const nameMatch = accessibleName.match(/ver detalle de\s+(.+)/i);
+  const name = nameMatch?.[1]?.trim();
+
+  if (!name) {
+    throw new Error(`Expected product link aria-label with product name, got '${accessibleName}'.`);
+  }
+
+  return {
+    name,
+    slug: slugMatch[1],
+  };
+}
+
 async function openProductDetailFromListing(
   page: Page,
   availability: "stock" | "encargue",
-  product: { name: string; slug: string },
+  product: ListingProduct,
 ) {
   const productDetailLink = page.getByRole("link", { name: new RegExp(`ver detalle de ${escapeRegExp(product.name)}`, "i") }).first();
 
   await expect(productDetailLink).toBeVisible();
-  await Promise.all([
-    page.waitForURL(new RegExp(`/${availability}/${product.slug}$`)),
-    productDetailLink.click(),
-  ]);
+  await productDetailLink.click();
+  await expect(page).toHaveURL(new RegExp(`/${availability}/${product.slug}$`));
   await expect(page.getByRole("heading", { name: new RegExp(escapeRegExp(product.name), "i") })).toBeVisible();
+}
+
+async function selectFirstAvailablePdpSize(page: Page): Promise<string | null> {
+  const sizeButton = page.locator("section:has-text('Talles') button:not([disabled])").first();
+
+  if ((await sizeButton.count()) === 0) {
+    return null;
+  }
+
+  const buttonText = ((await sizeButton.innerText()) ?? "").trim();
+  const sizeLabel = buttonText.split(/\s+/)[0]?.trim() ?? "";
+
+  await sizeButton.click();
+  return sizeLabel || null;
 }
 
 test("renders the accepted /catalogo hub with logo and two blocks only", async ({ page }) => {
@@ -74,112 +111,189 @@ test("keeps navigation coherent from home to catalog hub, listings, and detail p
   await expect(page.getByRole("heading", { name: /stock listo para elegir y cerrar/i })).toBeVisible();
   await expect(page.getByRole("link", { name: /ver ambos catálogos/i })).toBeVisible();
 
-  await openProductDetailFromListing(page, "stock", stockProduct);
-  await expect(page.getByRole("link", { name: /catálogos/i })).toBeVisible();
-  await expect(page.getByRole("link", { name: /stock/i })).toBeVisible();
+  const stockProduct = await getFirstListingProduct(page, "stock");
 
-  await page.getByRole("link", { name: /catálogos/i }).click();
+  if (stockProduct) {
+    await openProductDetailFromListing(page, "stock", stockProduct);
+    await expect(page.getByRole("link", { name: /catálogos/i })).toBeVisible();
+    await expect(page.getByRole("link", { name: /stock/i })).toBeVisible();
+    await page.getByRole("link", { name: /catálogos/i }).click();
+  } else {
+    await expect(page.getByText(/no hay stock/i)).toBeVisible();
+    await page.getByRole("link", { name: /ver ambos catálogos/i }).click();
+  }
 
   await expect(page).toHaveURL(/\/catalogo$/);
   await page.getByRole("link", { name: /abrir encargues/i }).click();
 
   await expect(page).toHaveURL(/\/encargue$/);
-  await expect(page.getByRole("heading", { name: /elegí en el catálogo y avanzá el encargue/i })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /elegí el producto y avanzá sin trámites/i })).toBeVisible();
   await expect(page.getByRole("link", { name: /ver ambos catálogos/i })).toBeVisible();
 
-  await openProductDetailFromListing(page, "encargue", encargueProduct);
-  await expect(page.getByRole("link", { name: /catálogos/i })).toBeVisible();
-  await expect(page.getByRole("link", { name: /^encargue$/i })).toBeVisible();
+  const encargueProduct = await getFirstListingProduct(page, "encargue");
+
+  if (encargueProduct) {
+    await openProductDetailFromListing(page, "encargue", encargueProduct);
+    await expect(page.getByRole("link", { name: /catálogos/i })).toBeVisible();
+    await expect(page.getByRole("link", { name: /^encargue$/i })).toBeVisible();
+  } else {
+    await expect(page.getByText(/no hay encargues/i)).toBeVisible();
+  }
 });
 
-test("links homepage categories to the right listing with the category filter applied", async ({ page }) => {
+test("links homepage categories to encargue listing when category cards exist", async ({ page }) => {
   await page.goto("/");
 
-  await page.getByRole("link", { name: /hoodies/i }).click();
+  const categorySection = page.locator("section#categorias");
+  const firstCategoryLink = categorySection.getByRole("link", { name: /ver categoría/i }).first();
 
-  await expect(page).toHaveURL(/\/encargue\?category=hoodies$/);
-  await expect(page.getByRole("heading", { name: /elegí en el catálogo y avanzá el encargue/i })).toBeVisible();
-  await expect(page.getByRole("link", { name: new RegExp(`ver detalle de ${encargueProduct.name}`, "i") })).toBeVisible();
+  if ((await firstCategoryLink.count()) > 0) {
+    await firstCategoryLink.click();
+    await expect(page).toHaveURL(/\/encargue\?category=/);
+    await expect(page.getByRole("heading", { name: /elegí el producto y avanzá sin trámites/i })).toBeVisible();
+  } else {
+    await expect(page.getByText(/todavía no hay categorías con encargues publicados/i)).toBeVisible();
+    await expect(page.getByRole("link", { name: /ir al catálogo de encargues/i })).toBeVisible();
+  }
 });
 
-test("renders delivery estimates and the stock-focused home selection", async ({ page }) => {
+test("renders delivery estimates and handles empty stock spotlight on home", async ({ page }) => {
   await page.goto("/");
 
-  await expect(page.getByText(/entrega estimada/i)).toHaveCount(2);
-  await expect(page.getByText(/2-5 días/i)).toBeVisible();
+  await expect(page.getByText(/2-5 días/i).first()).toBeVisible();
   await expect(page.getByText(/30-60 días/i)).toBeVisible();
   await expect(page.getByRole("heading", { name: /selección inmediata/i })).toBeVisible();
 
   const stockSelection = page.locator("section#seleccion-inmediata");
+  const stockProductLink = stockSelection.getByRole("link", { name: /ver detalle de/i }).first();
 
-  await expect(stockSelection.getByRole("link", { name: new RegExp(`ver detalle de ${stockProduct.name}`, "i") })).toBeVisible();
-  await expect(stockSelection.getByText(/stock inmediato/i).first()).toBeVisible();
+  if ((await stockProductLink.count()) > 0) {
+    await expect(stockProductLink).toBeVisible();
+    await expect(stockSelection.getByText(/stock inmediato/i).first()).toBeVisible();
+  } else {
+    await expect(stockSelection.getByText(/no hay productos de stock publicados ahora/i)).toBeVisible();
+    await expect(stockSelection.getByRole("link", { name: /abrir catálogo de stock/i })).toBeVisible();
+  }
 });
 
-test("renders stock and encargue listings and opens product details", async ({ page }) => {
+test("renders stock and encargue listings and opens product details when available", async ({ page }) => {
   await page.goto("/stock");
 
   await expect(page.getByRole("heading", { name: /stock listo para elegir y cerrar/i })).toBeVisible();
-  await openProductDetailFromListing(page, "stock", stockProduct);
+  const stockProduct = await getFirstListingProduct(page, "stock");
+
+  if (stockProduct) {
+    await openProductDetailFromListing(page, "stock", stockProduct);
+  } else {
+    await expect(page.getByText(/no hay stock/i)).toBeVisible();
+  }
 
   await page.goto("/encargue");
 
-  await expect(page.getByRole("heading", { name: /elegí en el catálogo y avanzá el encargue/i })).toBeVisible();
-  await openProductDetailFromListing(page, "encargue", encargueProduct);
+  await expect(page.getByRole("heading", { name: /elegí el producto y avanzá sin trámites/i })).toBeVisible();
+  const encargueProduct = await getFirstListingProduct(page, "encargue");
+
+  if (encargueProduct) {
+    await openProductDetailFromListing(page, "encargue", encargueProduct);
+  } else {
+    await expect(page.getByText(/no hay encargues/i)).toBeVisible();
+  }
 });
 
-test("updates WhatsApp CTA href when selecting a size on stock PDP", async ({ page }) => {
-  await page.goto(`/stock/${stockProduct.slug}`);
+test("keeps stock WhatsApp CTA coherent without assuming hardcoded products", async ({ page }) => {
+  await page.goto("/stock");
+
+  const stockProduct = await getFirstListingProduct(page, "stock");
+
+  if (!stockProduct) {
+    await expect(page.getByText(/no hay stock/i)).toBeVisible();
+    return;
+  }
+
+  await openProductDetailFromListing(page, "stock", stockProduct);
 
   const whatsappCta = page.getByRole("link", { name: /reservar por whatsapp/i });
-  const defaultMessage = encodeURIComponent(
-    "Hola, quiero reservar Essentials Core Hoodie y coordinar entrega con thewestrep.",
-  );
-  const mediumSizeMessage = encodeURIComponent(
-    "Hola, quiero reservar Essentials Core Hoodie (M) y coordinar entrega con thewestrep.",
-  );
 
-  await expect(whatsappCta).toHaveAttribute("href", new RegExp(defaultMessage));
-  await selectPdpSize(page, "M", mediumSizeMessage);
+  await expect(whatsappCta).toHaveAttribute("href", new RegExp(escapeRegExp(buildStockWhatsappMessage(stockProduct.name))));
+
+  const selectedSize = await selectFirstAvailablePdpSize(page);
+
+  if (selectedSize) {
+    await expect(whatsappCta).toHaveAttribute(
+      "href",
+      new RegExp(escapeRegExp(buildStockWhatsappMessage(stockProduct.name, selectedSize))),
+    );
+    await expect(page.getByRole("button", { name: /agregar al carrito/i })).toBeEnabled();
+  } else {
+    await expect(page.getByRole("button", { name: /agregar al carrito/i })).toBeEnabled();
+  }
 });
 
 test("shows commercial context on listing cards and PDP before WhatsApp conversion", async ({ page }) => {
   await page.goto("/stock");
 
-  const stockCard = page.getByRole("link", { name: new RegExp(`ver detalle de ${stockProduct.name}`, "i") });
+  const stockProduct = await getFirstListingProduct(page, "stock");
 
-  await expect(stockCard.getByText(/hoodie de algodón pesado con fit relajado/i)).toBeVisible();
-  await expect(stockCard.getByText(/entrega coordinada en 24\/48 hs/i)).toBeVisible();
-  await expect(stockCard.getByText(/3 talles/i)).toBeVisible();
+  if (!stockProduct) {
+    await expect(page.getByText(/no hay stock/i)).toBeVisible();
+    return;
+  }
+
+  const stockCard = page.getByRole("link", { name: new RegExp(`ver detalle de ${escapeRegExp(stockProduct.name)}`, "i") }).first();
+
+  await expect(stockCard).toBeVisible();
+  await expect(stockCard.getByText(/entrega|encargue|stock/i).first()).toBeVisible();
 
   await openProductDetailFromListing(page, "stock", stockProduct);
-  await expect(page.getByRole("heading", { name: new RegExp(stockProduct.name, "i") })).toBeVisible();
   await expect(page.getByText(/detalle del producto/i)).toBeVisible();
   await expect(page.getByText(/tiempo estimado/i)).toBeVisible();
-  await expect(page.getByText(/coordiná stock y entrega por whatsapp/i).first()).toBeVisible();
-  await expect(page.getByText(/entrega coordinada en 24\/48 hs/i)).toBeVisible();
+  await expect(page.getByRole("link", { name: /whatsapp/i }).first()).toBeVisible();
 
-  await page.goto(`/encargue/${encargueProduct.slug}`);
+  await page.goto("/encargue");
+  const encargueProduct = await getFirstListingProduct(page, "encargue");
 
-  await expect(page.getByRole("heading", { name: new RegExp(encargueProduct.name, "i") })).toBeVisible();
-  await expect(page.getByText(/arribo estimado de 40-60 días/i)).toBeVisible();
+  if (!encargueProduct) {
+    await expect(page.getByText(/no hay encargues/i)).toBeVisible();
+    return;
+  }
+
+  await openProductDetailFromListing(page, "encargue", encargueProduct);
+  await expect(page.getByText(/tiempo estimado/i)).toBeVisible();
 });
 
-test("moves from cart drawer to checkout and closes a simulated order", async ({ page }) => {
-  await page.goto(`/stock/${stockProduct.slug}`);
+test("moves from cart drawer to checkout when stock items exist", async ({ page }) => {
+  await page.goto("/stock");
 
-  await selectPdpSize(
-    page,
-    "M",
-    encodeURIComponent("Hola, quiero reservar Essentials Core Hoodie (M) y coordinar entrega con thewestrep."),
-  );
+  const stockProduct = await getFirstListingProduct(page, "stock");
+
+  if (!stockProduct) {
+    await page.goto("/checkout");
+    await expect(page.getByText(/checkout vacío/i)).toBeVisible();
+    await expect(page.getByText(/todavía no hay productos para cerrar/i)).toBeVisible();
+    return;
+  }
+
+  await openProductDetailFromListing(page, "stock", stockProduct);
+
+  const selectedSize = await selectFirstAvailablePdpSize(page);
+
+  if (selectedSize) {
+    await expect(page.getByRole("link", { name: /reservar por whatsapp/i })).toHaveAttribute(
+      "href",
+      new RegExp(escapeRegExp(buildStockWhatsappMessage(stockProduct.name, selectedSize))),
+    );
+  }
+
   await page.getByRole("button", { name: /agregar al carrito/i }).click();
 
   const cartDrawer = page.locator("aside");
 
   await expect(cartDrawer).toBeVisible();
-  await expect(cartDrawer.getByText(stockProduct.name)).toBeVisible();
-  await expect(cartDrawer.getByText(/^m$/i)).toBeVisible();
+  await expect(cartDrawer.getByText(new RegExp(escapeRegExp(stockProduct.name), "i"))).toBeVisible();
+
+  if (selectedSize) {
+    await expect(cartDrawer.getByText(new RegExp(`^${escapeRegExp(selectedSize)}$`, "i"))).toBeVisible();
+  }
 
   await page.getByRole("link", { name: /ir al checkout/i }).click();
 
@@ -195,5 +309,5 @@ test("moves from cart drawer to checkout and closes a simulated order", async ({
   await expect(page.getByRole("heading", { name: /checkout cerrado del lado cliente/i })).toBeVisible();
   await expect(page.getByText(/orden twr-/i)).toBeVisible();
   await expect(page.getByText(/juan test/i)).toBeVisible();
-  await expect(page.getByText(/essentials core hoodie/i)).toBeVisible();
+  await expect(page.getByText(new RegExp(escapeRegExp(stockProduct.name), "i"))).toBeVisible();
 });

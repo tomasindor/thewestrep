@@ -3,6 +3,7 @@ import { boolean, integer, jsonb, pgEnum, text, timestamp } from "drizzle-orm/pg
 import { pgTable } from "drizzle-orm/pg-core";
 
 import type { ProductSizeGuideRow } from "@/lib/catalog/types";
+import type { ImageVariantsManifest } from "@/lib/types/media";
 
 const timestamps = {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
@@ -12,6 +13,10 @@ const timestamps = {
 export const productTypeEnum = pgEnum("product_type", ["stock", "encargue"]);
 export const productStateEnum = pgEnum("product_state", ["draft", "published", "paused"]);
 export const productImageSourceEnum = pgEnum("product_image_source", ["manual", "yupoo"]);
+export const importJobsStatusEnum = pgEnum("import_job_status", ["running", "completed", "failed"]);
+export const importJobsSourceEnum = pgEnum("import_job_source", ["admin", "bulk"]);
+export const importItemsStatusEnum = pgEnum("import_item_status", ["pending", "approved", "rejected", "promoted", "media_failed"]);
+export const importImagesReviewStateEnum = pgEnum("import_image_review_state", ["pending", "approved", "rejected"]);
 export const orderCheckoutModeEnum = pgEnum("order_checkout_mode", ["guest", "account"]);
 export const orderAuthProviderEnum = pgEnum("order_auth_provider", ["guest", "credentials", "google"]);
 export const orderStatusEnum = pgEnum("order_status", ["submitted", "cancelled"]);
@@ -91,6 +96,7 @@ export const orders = pgTable("orders", {
     .$type<{
       currencyCode: "ARS";
       subtotalAmountArs: number;
+      comboDiscountAmountArs?: number;
       shippingAmountArs: number;
       assistedFeeAmountArs: number;
       totalAmountArs: number;
@@ -126,6 +132,12 @@ export const orderItems = pgTable("order_items", {
       quantity: number;
       unitPriceAmountArs: number;
       lineTotalAmountArs: number;
+      comboDiscount?: {
+        amountArs: number;
+        reason: string;
+        pairedWithProductId?: string;
+        pairedWithProductName?: string;
+      };
       variantLabel?: string;
       sizeLabel?: string;
       productImage?: {
@@ -178,6 +190,10 @@ export const products = pgTable("products", {
   availabilityNote: text("availability_note").notNull().default(""),
   whatsappCtaLabel: text("whatsapp_cta_label").notNull().default(""),
   whatsappMessage: text("whatsapp_message").notNull().default(""),
+  comboEligible: boolean("combo_eligible").notNull().default(false),
+  comboGroup: text("combo_group"),
+  comboPriority: integer("combo_priority").notNull().default(0),
+  comboSourceKey: text("combo_source_key"),
   state: productStateEnum("state").notNull().default("draft"),
   sourceUrl: text("source_url"),
   ...timestamps,
@@ -193,10 +209,43 @@ export const productImages = pgTable("product_images", {
   provider: text("provider"),
   assetKey: text("asset_key"),
   cloudName: text("cloud_name"),
+  variantsManifest: jsonb("variants_manifest").$type<ImageVariantsManifest | null>(),
   alt: text("alt").notNull().default(""),
   position: integer("position").notNull().default(0),
   source: productImageSourceEnum("source").notNull().default("manual"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const importJobs = pgTable("import_jobs", {
+  id: text("id").primaryKey(),
+  status: importJobsStatusEnum("status").notNull().default("running"),
+  source: importJobsSourceEnum("source").notNull(),
+  sourceReference: text("source_reference"),
+  ...timestamps,
+});
+
+export const importItems = pgTable("import_items", {
+  id: text("id").primaryKey(),
+  importJobId: text("import_job_id")
+    .notNull()
+    .references(() => importJobs.id, { onDelete: "cascade" }),
+  status: importItemsStatusEnum("status").notNull().default("approved"),
+  productData: jsonb("product_data").$type<Record<string, unknown> | null>(),
+  price: integer("price"),
+  ...timestamps,
+});
+
+export const importImages = pgTable("import_images", {
+  id: text("id").primaryKey(),
+  importItemId: text("import_item_id")
+    .notNull()
+    .references(() => importItems.id, { onDelete: "cascade" }),
+  sourceUrl: text("source_url").notNull(),
+  previewUrl: text("preview_url"),
+  reviewState: importImagesReviewStateEnum("review_state").notNull().default("approved"),
+  isSizeGuide: boolean("is_size_guide").notNull().default(false),
+  order: integer("order").notNull().default(0),
+  ...timestamps,
 });
 
 export const productSizes = pgTable("product_sizes", {
@@ -261,6 +310,25 @@ export const productRelations = relations(products, ({ one, many }) => ({
   variants: many(productVariants),
 }));
 
+export const importJobRelations = relations(importJobs, ({ many }) => ({
+  items: many(importItems),
+}));
+
+export const importItemRelations = relations(importItems, ({ one, many }) => ({
+  importJob: one(importJobs, {
+    fields: [importItems.importJobId],
+    references: [importJobs.id],
+  }),
+  images: many(importImages),
+}));
+
+export const importImageRelations = relations(importImages, ({ one }) => ({
+  importItem: one(importItems, {
+    fields: [importImages.importItemId],
+    references: [importItems.id],
+  }),
+}));
+
 export const orderRelations = relations(orders, ({ one, many }) => ({
   customerAccount: one(customerAccounts, {
     fields: [orders.customerAccountId],
@@ -311,6 +379,9 @@ export type OrderItemRecord = typeof orderItems.$inferSelect;
 export type OrderRecord = typeof orders.$inferSelect;
 export type ProductRecord = typeof products.$inferSelect;
 export type ProductImageRecord = typeof productImages.$inferSelect;
+export type ImportJobRecord = typeof importJobs.$inferSelect;
+export type ImportItemRecord = typeof importItems.$inferSelect;
+export type ImportImageRecord = typeof importImages.$inferSelect;
 export type ProductSizeRecord = typeof productSizes.$inferSelect;
 export type ProductSizeGuideRecord = typeof productSizeGuides.$inferSelect;
 export type ProductVariantRecord = typeof productVariants.$inferSelect;
@@ -352,4 +423,3 @@ const inventoryRelations = relations(inventory, ({ one }) => ({
 
 export type PaymentEventRecord = typeof paymentEvents.$inferSelect;
 export type InventoryRecord = typeof inventory.$inferSelect;
-

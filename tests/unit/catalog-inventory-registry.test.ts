@@ -4,10 +4,14 @@ import assert from "node:assert/strict";
 import { brands } from "../../lib/catalog/data/brands";
 import { editableEncargueProducts } from "../../lib/catalog/data/inventory-editable-encargue";
 import { editableStockProducts } from "../../lib/catalog/data/inventory-editable-stock";
+import type { EditableInventoryProduct } from "../../lib/catalog/types";
 
 test("editable inventory brand references resolve and inventory validation stays clean", async () => {
   const brandIds = new Set(brands.map((brand) => brand.id));
-  const products = [...editableStockProducts, ...editableEncargueProducts];
+  const products: readonly EditableInventoryProduct[] = [
+    ...editableStockProducts,
+    ...editableEncargueProducts,
+  ];
 
   for (const product of products) {
     assert.equal(

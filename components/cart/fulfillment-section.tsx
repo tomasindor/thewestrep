@@ -113,13 +113,16 @@ export function FulfillmentSection({
         <div className={`mt-6 rounded-[1.4rem] border p-4 text-sm leading-6 text-slate-200 ${accentSurfaceClassName}`}>
           <p className="font-semibold text-white">Encargue internacional asistido puerta a puerta</p>
           <p className="mt-2">
-            Tu pedido incluye seguimiento asistido hasta la entrega en domicilio.
+            Vos no tenés que gestionar la importación: nosotros hacemos toda la operatoria internacional, liberamos el pedido y después despachamos localmente por Correo Argentino.
           </p>
           <p className={`mt-2 ${accentTextClassName}`}>
             Correo Argentino agrega un cargo fijo único de {formatArs(CORREO_ARGENTINO_FEE)} por pedido asistido, sin importar la cantidad de productos.
           </p>
           <p className="mt-2 text-slate-300">
-            Los tiempos son estimados y pueden variar según operador, aduana y correo local. En casos excepcionales puede requerirse validar datos del destinatario final.
+            Plazo estimado de entrega: entre 30 y 60 días. Puede moverse según aduana, transporte aéreo, consolidación de carga y tiempos del correo local una vez que ingresa al país.
+          </p>
+          <p className="mt-2 text-slate-300">
+            Si necesitamos algún dato tuyo para la entrega final te lo vamos a pedir nosotros, pero NO tenés que hacer trámites de importación por tu cuenta.
           </p>
         </div>
       ) : null}

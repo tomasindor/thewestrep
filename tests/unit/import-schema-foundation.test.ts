@@ -1,0 +1,107 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import {
+  importImages,
+  importImagesReviewStateEnum,
+  importItems,
+  importItemsStatusEnum,
+  importJobs,
+  importJobsSourceEnum,
+  importJobsStatusEnum,
+  productImages,
+} from "../../lib/db/schema";
+import {
+  getProductImagesSchemaCompatibilityWarning,
+  type ProductImagesSchemaCompatibility,
+} from "../../lib/db/product-images-schema-compat";
+import {
+  getProductsSchemaCompatibilityWarning,
+  type ProductsSchemaCompatibility,
+} from "../../lib/db/products-schema-compat";
+
+test("schema exports staging import tables for jobs, items, and images", () => {
+  assert.ok(importJobs.id);
+  assert.ok(importJobs.status);
+  assert.ok(importJobs.source);
+  assert.ok(importJobs.sourceReference);
+
+  assert.ok(importItems.id);
+  assert.ok(importItems.importJobId);
+  assert.ok(importItems.status);
+  assert.ok(importItems.productData);
+  assert.ok(importItems.price);
+
+  assert.ok(importImages.id);
+  assert.ok(importImages.importItemId);
+  assert.ok(importImages.sourceUrl);
+  assert.ok(importImages.order);
+  assert.ok(importImages.reviewState);
+  assert.ok(importImages.isSizeGuide);
+
+  assert.ok(productImages.variantsManifest);
+});
+
+test("schema exports import enums with required states", () => {
+  assert.deepEqual(importJobsStatusEnum.enumValues, ["running", "completed", "failed"]);
+  assert.deepEqual(importJobsSourceEnum.enumValues, ["admin", "bulk"]);
+  assert.deepEqual(importItemsStatusEnum.enumValues, ["pending", "approved", "rejected", "promoted", "media_failed"]);
+  assert.deepEqual(importImagesReviewStateEnum.enumValues, ["pending", "approved", "rejected"]);
+});
+
+test("product images schema compatibility warns when variants_manifest column is missing", () => {
+  const compatibility: ProductImagesSchemaCompatibility = {
+    hasSourceUrl: true,
+    hasProvider: true,
+    hasAssetKey: true,
+    hasCloudName: true,
+    hasVariantsManifest: false,
+  };
+
+  const warning = getProductImagesSchemaCompatibilityWarning(compatibility);
+
+  assert.ok(warning);
+  assert.match(warning, /variants_manifest/);
+});
+
+test("product images schema compatibility does not warn when all managed columns exist", () => {
+  const compatibility: ProductImagesSchemaCompatibility = {
+    hasSourceUrl: true,
+    hasProvider: true,
+    hasAssetKey: true,
+    hasCloudName: true,
+    hasVariantsManifest: true,
+  };
+
+  const warning = getProductImagesSchemaCompatibilityWarning(compatibility);
+
+  assert.equal(warning, undefined);
+});
+
+test("products schema compatibility warns when combo columns are missing", () => {
+  const compatibility: ProductsSchemaCompatibility = {
+    hasComboEligible: false,
+    hasComboGroup: true,
+    hasComboPriority: false,
+    hasComboSourceKey: true,
+  };
+
+  const warning = getProductsSchemaCompatibilityWarning(compatibility);
+
+  assert.ok(warning);
+  assert.match(warning, /combo_eligible/);
+  assert.match(warning, /combo_priority/);
+});
+
+test("products schema compatibility does not warn when combo columns exist", () => {
+  const compatibility: ProductsSchemaCompatibility = {
+    hasComboEligible: true,
+    hasComboGroup: true,
+    hasComboPriority: true,
+    hasComboSourceKey: true,
+  };
+
+  const warning = getProductsSchemaCompatibilityWarning(compatibility);
+
+  assert.equal(warning, undefined);
+});

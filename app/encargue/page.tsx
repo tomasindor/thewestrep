@@ -4,6 +4,7 @@ import {
   CatalogListingPage,
   getCatalogListingMetadata,
 } from "@/components/catalog/catalog-listing-page";
+import { resolvePromoIdFromSearchParams } from "@/lib/catalog";
 
 export const metadata: Metadata = getCatalogListingMetadata("encargue");
 
@@ -12,5 +13,14 @@ interface EncarguePageProps {
 }
 
 export default async function EncarguePage({ searchParams }: EncarguePageProps) {
-  return <CatalogListingPage availability="encargue" searchParams={await searchParams} />;
+  const resolvedSearchParams = await searchParams;
+  const promoId = resolvePromoIdFromSearchParams(resolvedSearchParams);
+
+  return (
+    <CatalogListingPage
+      availability="encargue"
+      searchParams={resolvedSearchParams}
+      promoId={promoId}
+    />
+  );
 }

@@ -27,6 +27,8 @@ export interface CatalogFilterGroups {
 export interface CatalogProductFilters {
   brandId?: Brand["id"];
   categoryId?: Category["id"];
+  categoryIds?: Category["id"][];
+  promoId?: string;
   query?: string;
   sort?: CatalogProductSort;
   availability?: ProductAvailability;
@@ -79,6 +81,15 @@ export interface HomepageCategorySpotlight extends Category {
 
 export type HomepageFeaturedProduct = CatalogProduct;
 
+export interface HomepageComboHighlight {
+  comboGroup: string;
+  top: CatalogProduct;
+  bottom: CatalogProduct;
+  originalPairAmountArs: number;
+  comboPairAmountArs: number;
+  discountAmountArs: number;
+}
+
 export function getAvailabilityLabel(availability: ProductAvailability) {
   return availabilityLabels[availability];
 }
@@ -89,7 +100,7 @@ export function getCatalogPath(availability: ProductAvailability) {
 
 export function getCatalogFilterHref(
   availability: ProductAvailability,
-  filters: Pick<CatalogProductFilters, "brandId" | "categoryId" | "query" | "sort">,
+  filters: Pick<CatalogProductFilters, "brandId" | "categoryId" | "promoId" | "query" | "sort">,
 ) {
   const params = new URLSearchParams();
 
@@ -99,6 +110,10 @@ export function getCatalogFilterHref(
 
   if (filters.categoryId) {
     params.set("category", filters.categoryId);
+  }
+
+  if (filters.promoId) {
+    params.set("promo", filters.promoId);
   }
 
   if (filters.query) {

@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { CatalogHeader } from "@/components/catalog/catalog-header";
+import { ComboRail } from "@/components/catalog/combo-rail";
 import { ProductBreadcrumb } from "@/components/catalog/product-breadcrumb";
 import { ProductImageGallery } from "@/components/catalog/product-image-gallery";
 import { RelatedProductsCarousel } from "@/components/catalog/related-products-carousel";
@@ -226,6 +227,10 @@ export async function ProductDetailPage({ product }: ProductDetailPageProps) {
                 ))}
               </div>
             </section>
+
+            {product.comboEligible && product.comboGroup ? (
+              <ComboRail product={product} comboGroup={product.comboGroup} availability={product.availability} />
+            ) : null}
 
             {relatedProducts.length > 0 ? (
               <section className="space-y-8 border-t border-white/8 pt-14 sm:space-y-9 sm:pt-18 lg:pt-24">

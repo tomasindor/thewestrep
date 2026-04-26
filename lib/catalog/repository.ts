@@ -13,6 +13,10 @@ import {
   getProductSizeGuidesSchemaCompatibility,
   getProductSizeGuidesSchemaCompatibilityWarning,
 } from "@/lib/db/product-size-guides-schema-compat";
+import {
+  getProductsSchemaCompatibility,
+  getProductsSchemaCompatibilityWarning,
+} from "@/lib/db/products-schema-compat";
 import { brands, categories, productImages, products, productSizeGuides, productSizes, productVariants } from "@/lib/db/schema";
 import { buildEditableCommercialAvailabilityBySlug, enrichCommercialAvailabilityInfo } from "@/lib/catalog/commercial-availability";
 import {
@@ -37,6 +41,7 @@ import type {
   Product,
   ProductAvailability,
   ProductAvailabilityInfo,
+  ProductImage,
   ProductSizeGuide,
   ProductSize,
   ProductState,
@@ -56,8 +61,6 @@ const DEFAULT_PRODUCT_NOTE: Record<ProductAvailability, string> = {
   stock: "",
   encargue: "",
 };
-
-const MIN_HOMEPAGE_STOCK_PRODUCTS = 5;
 
 function mapFallbackBrands() {
   return catalogInventorySource.brands.map((brand) => ({
@@ -117,6 +120,10 @@ function mapFallbackProducts() {
         productName: product.name,
         availability: product.availability,
       }),
+      comboEligible: product.comboEligible,
+      comboGroup: product.comboGroup,
+      comboPriority: product.comboPriority,
+      comboSourceKey: product.comboSourceKey,
       gallery:
         rawGallery.length > 0
           ? rawGallery
@@ -146,50 +153,6 @@ async function resolvePreferredBrandLogos(brands: readonly Brand[]) {
       return preferredImage === brand.image ? brand : { ...brand, image: preferredImage };
     }),
   );
-}
-
-function mergeEntitiesById<T extends { id: string }>(primary: readonly T[], fallback: readonly T[]) {
-  const entitiesById = new Map(primary.map((entity) => [entity.id, entity]));
-
-  for (const entity of fallback) {
-    if (!entitiesById.has(entity.id)) {
-      entitiesById.set(entity.id, entity);
-    }
-  }
-
-  return Array.from(entitiesById.values());
-}
-
-function countPublishedStockProducts(products: readonly Product[]) {
-  return products.filter((product) => product.availability === "stock" && product.state === "published").length;
-}
-
-function supplementStockProducts(dataset: {
-  brands: readonly Brand[];
-  categories: readonly Category[];
-  products: readonly Product[];
-}) {
-  if (countPublishedStockProducts(dataset.products) >= MIN_HOMEPAGE_STOCK_PRODUCTS) {
-    return {
-      brands: [...dataset.brands],
-      categories: [...dataset.categories],
-      products: [...dataset.products],
-    };
-  }
-
-  const existingProductIds = new Set(dataset.products.map((product) => product.id));
-  const supplementalStockProducts = fallbackData.products.filter(
-    (product) => product.availability === "stock" && !existingProductIds.has(product.id),
-  );
-
-  const missingProductsCount = MIN_HOMEPAGE_STOCK_PRODUCTS - countPublishedStockProducts(dataset.products);
-  const nextProducts = [...dataset.products, ...supplementalStockProducts.slice(0, missingProductsCount)];
-
-  return {
-    brands: mergeEntitiesById(dataset.brands, fallbackData.brands),
-    categories: mergeEntitiesById(dataset.categories, fallbackData.categories),
-    products: nextProducts,
-  };
 }
 
 function parseManagedImageProvider(value: string | null | undefined): ManagedImageProvider | null {
@@ -249,10 +212,41 @@ interface ProductImageRowCompat {
   provider: string | null;
   assetKey: string | null;
   cloudName: string | null;
+  variantsManifest: unknown;
   alt: string;
   position: number;
   source: "manual" | "yupoo";
   createdAt: Date;
+}
+
+interface ProductRowCompat {
+  id: string;
+  type: ProductAvailability;
+  name: string;
+  slug: string;
+  brandId: string;
+  categoryId: string;
+  priceArs: number;
+  description: string;
+  availabilityNote: string;
+  whatsappCtaLabel: string;
+  whatsappMessage: string;
+  comboEligible: boolean;
+  comboGroup: string | null;
+  comboPriority: number;
+  comboSourceKey: string | null;
+  state: ProductState;
+  sourceUrl: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+function normalizeVariantsManifest(value: unknown) {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  return value as ProductImage["variantsManifest"];
 }
 
 interface ProductSizeGuideRowCompat {
@@ -382,6 +376,53 @@ async function selectBrandRows() {
   return normalizeSqlRows<BrandRowCompat>(result);
 }
 
+async function selectProductRows() {
+  const sqlClient = getDbSql();
+  const compatibility = await getProductsSchemaCompatibility();
+
+  if (!sqlClient) {
+    return {
+      rows: [] as ProductRowCompat[],
+      compatibility,
+    };
+  }
+
+  const comboEligibleSelection = compatibility.hasComboEligible ? "combo_eligible" : "false::boolean";
+  const comboGroupSelection = compatibility.hasComboGroup ? "combo_group" : "null::text";
+  const comboPrioritySelection = compatibility.hasComboPriority ? "combo_priority" : "0::integer";
+  const comboSourceKeySelection = compatibility.hasComboSourceKey ? "combo_source_key" : "null::text";
+
+  const result = await sqlClient.query(`
+    select
+      id,
+      type,
+      name,
+      slug,
+      brand_id as "brandId",
+      category_id as "categoryId",
+      price_ars as "priceArs",
+      description,
+      availability_note as "availabilityNote",
+      whatsapp_cta_label as "whatsappCtaLabel",
+      whatsapp_message as "whatsappMessage",
+      ${comboEligibleSelection} as "comboEligible",
+      ${comboGroupSelection} as "comboGroup",
+      ${comboPrioritySelection} as "comboPriority",
+      ${comboSourceKeySelection} as "comboSourceKey",
+      state,
+      source_url as "sourceUrl",
+      created_at as "createdAt",
+      updated_at as "updatedAt"
+    from products
+    order by updated_at desc, created_at desc
+  `);
+
+  return {
+    rows: normalizeSqlRows<ProductRowCompat>(result),
+    compatibility,
+  };
+}
+
 async function selectBrandManagedImageState(id: string) {
   const sqlClient = getDbSql();
   const compatibility = await getBrandSchemaCompatibility();
@@ -426,6 +467,7 @@ async function selectProductImageRows() {
   const providerSelection = compatibility.hasProvider ? "provider" : "null::text";
   const assetKeySelection = compatibility.hasAssetKey ? "asset_key" : "null::text";
   const cloudNameSelection = compatibility.hasCloudName ? "cloud_name" : "null::text";
+  const variantsManifestSelection = compatibility.hasVariantsManifest ? "variants_manifest" : "null::jsonb";
   const result = await sqlClient.query(`
     select
       id,
@@ -435,6 +477,7 @@ async function selectProductImageRows() {
       ${providerSelection} as provider,
       ${assetKeySelection} as "assetKey",
       ${cloudNameSelection} as "cloudName",
+      ${variantsManifestSelection} as "variantsManifest",
       alt,
       position,
       source,
@@ -464,6 +507,7 @@ async function selectProductManagedImageStates(productId: string) {
   const providerSelection = compatibility.hasProvider ? "provider" : "null::text";
   const assetKeySelection = compatibility.hasAssetKey ? "asset_key" : "null::text";
   const cloudNameSelection = compatibility.hasCloudName ? "cloud_name" : "null::text";
+  const variantsManifestSelection = compatibility.hasVariantsManifest ? "variants_manifest" : "null::jsonb";
   const result = await sqlClient.query(
     `
       select
@@ -474,6 +518,7 @@ async function selectProductManagedImageStates(productId: string) {
         ${providerSelection} as provider,
         ${assetKeySelection} as "assetKey",
         ${cloudNameSelection} as "cloudName",
+        ${variantsManifestSelection} as "variantsManifest",
         alt,
         position,
         source,
@@ -516,10 +561,10 @@ const loadDatabaseCatalog = cache(async function loadDatabaseCatalog() {
 
   try {
     const sizeGuideCompatibility = await getProductSizeGuidesSchemaCompatibility();
-    const [brandRows, categoryRows, productRows, productImageSelection, sizeRows, variantRows, sizeGuideRows] = await Promise.all([
+    const [brandRows, categoryRows, productSelection, productImageSelection, sizeRows, variantRows, sizeGuideRows] = await Promise.all([
       selectBrandRows(),
       db.select().from(categories).orderBy(asc(categories.name)),
-      db.select().from(products).orderBy(desc(products.updatedAt), desc(products.createdAt)),
+      selectProductRows(),
       selectProductImageRows(),
       db.select().from(productSizes).orderBy(asc(productSizes.position), asc(productSizes.createdAt)),
       db.select().from(productVariants).orderBy(asc(productVariants.position), asc(productVariants.createdAt)),
@@ -527,6 +572,11 @@ const loadDatabaseCatalog = cache(async function loadDatabaseCatalog() {
         ? db.select().from(productSizeGuides).orderBy(desc(productSizeGuides.updatedAt), desc(productSizeGuides.createdAt))
         : Promise.resolve([]),
     ]);
+    const productRows = productSelection.rows;
+    const productsSchemaWarning = getProductsSchemaCompatibilityWarning(productSelection.compatibility);
+    if (productsSchemaWarning) {
+      console.warn(productsSchemaWarning);
+    }
     const imageRows = productImageSelection.rows;
 
     const imagesByProductId = new Map<string, typeof imageRows>();
@@ -607,6 +657,7 @@ const loadDatabaseCatalog = cache(async function loadDatabaseCatalog() {
                 provider: parseManagedProductImageProvider(image.provider) ?? undefined,
                 assetKey: image.assetKey ?? undefined,
                 cloudName: image.cloudName ?? getCloudinaryConfig()?.cloudName ?? undefined,
+                variantsManifest: normalizeVariantsManifest(image.variantsManifest),
               }))
             : [
                 {
@@ -666,6 +717,10 @@ const loadDatabaseCatalog = cache(async function loadDatabaseCatalog() {
             label: variant.label,
           })),
           sourceUrl: product.sourceUrl ?? undefined,
+          comboEligible: product.comboEligible,
+          comboGroup: product.comboGroup ?? undefined,
+          comboPriority: product.comboPriority,
+          comboSourceKey: product.comboSourceKey ?? undefined,
         } satisfies Product;
       }),
     };
@@ -685,11 +740,9 @@ export async function getCatalogDataset() {
     };
   }
 
-  const supplementedCatalog = supplementStockProducts(databaseCatalog);
-
   return {
-    ...supplementedCatalog,
-    brands: await resolvePreferredBrandLogos(supplementedCatalog.brands),
+    ...databaseCatalog,
+    brands: await resolvePreferredBrandLogos(databaseCatalog.brands),
   };
 }
 
@@ -840,6 +893,7 @@ export async function upsertProduct(input: AdminProductInput) {
         ...(productImagesCompatibility.hasProvider ? { provider: image.provider || null } : {}),
         ...(productImagesCompatibility.hasAssetKey ? { assetKey: image.assetKey || null } : {}),
         ...(productImagesCompatibility.hasCloudName ? { cloudName: image.cloudName || null } : {}),
+        ...(productImagesCompatibility.hasVariantsManifest ? { variantsManifest: null } : {}),
         alt: buildProductImageAlt({ productName: input.name, imageIndex: index + 1, totalImages: persistedImages.length }),
         position: index,
         source: input.sourceUrl && input.sourceUrl.includes("yupoo") ? ("yupoo" as const) : ("manual" as const),

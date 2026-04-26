@@ -1,3 +1,5 @@
+import type { ImageVariantsManifest } from "@/lib/types/media";
+
 export type ProductAvailability = "stock" | "encargue";
 
 export type ProductCurrency = "ARS" | "USD";
@@ -41,6 +43,7 @@ export interface ProductImage {
   provider?: "cloudinary" | "local";
   assetKey?: string;
   cloudName?: string;
+  variantsManifest?: ImageVariantsManifest;
 }
 
 export interface ProductPricing {
@@ -114,6 +117,11 @@ export interface Product {
   badge?: ProductBadge;
   featuredOnHomepage?: boolean;
   sourceUrl?: string;
+  comboEligible?: boolean;
+  comboGroup?: string;
+  comboPriority?: number;
+  comboSourceKey?: string;
+  comboScore?: number;
 }
 
 export interface EditableInventoryProduct {

@@ -61,10 +61,10 @@ export async function PublicHeader({
   );
 
   return (
-    <header className="sticky top-0 z-30 border-b border-white/8 bg-black/70 backdrop-blur-xl">
+    <header data-public-header className="sticky top-0 z-30 border-b border-white/8 bg-black/70 backdrop-blur-xl">
       <Container className="grid grid-cols-[auto_1fr_auto] items-center gap-4 py-3 sm:gap-6 sm:py-4">
         <PublicNavLink href={homeLinkHref} aria-label={homeLinkLabel} className="flex items-center gap-3 rounded-full px-1 py-1 transition hover:opacity-90">
-          <BrandLogo className="h-11 w-11 sm:h-14 sm:w-14" sizes="56px" priority />
+          <BrandLogo className="h-14 w-14 sm:h-18 sm:w-18" sizes="72px" priority />
         </PublicNavLink>
 
         <nav className="hidden items-center justify-center gap-6 text-sm text-slate-300 md:flex">

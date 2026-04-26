@@ -27,6 +27,48 @@ export interface CreatedOrderSummary {
   totalAmountArs: number;
 }
 
+export interface PersistedOrderItemRow {
+  id: string;
+  orderId: string;
+  productId: string;
+  productSlug: string;
+  productName: string;
+  productImageUrl?: string;
+  productImageAlt: string;
+  availability: "stock" | "encargue";
+  availabilityLabel: string;
+  unitPriceAmountArs: number;
+  quantity: number;
+  variantLabel?: string;
+  sizeLabel?: string;
+  lineTotalAmountArs: number;
+  itemSnapshot: {
+    productId: string;
+    productSlug: string;
+    productName: string;
+    availability: "stock" | "encargue";
+    availabilityLabel: string;
+    quantity: number;
+    unitPriceAmountArs: number;
+    lineTotalAmountArs: number;
+    comboDiscount?: {
+      amountArs: number;
+      reason: string;
+      pairedWithProductId?: string;
+      pairedWithProductName?: string;
+    };
+    variantLabel?: string;
+    sizeLabel?: string;
+    productImage?: {
+      src: string;
+      alt: string;
+      provider?: "cloudinary" | "local";
+      assetKey?: string;
+      cloudName?: string;
+    };
+  };
+}
+
 function requireDb() {
   const db = getDb();
 
@@ -103,6 +145,59 @@ function getCustomerAccountLink(
   }
 
   return sessionIdentity?.id ?? null;
+}
+
+export function buildOrderItemRowsForPersistence(input: {
+  payload: CheckoutOrderPayload;
+  orderId: string;
+  pricing: ReturnType<typeof buildOrderPricingSummary>;
+  idFactory?: () => string;
+}): PersistedOrderItemRow[] {
+  return input.payload.items.map((item) => {
+    const unitPriceAmountArs = getPriceAmount(item.priceDisplay);
+    const lineSubtotalAmountArs = unitPriceAmountArs * item.quantity;
+    const comboDiscount = input.pricing.comboDiscountByLineId[item.id];
+    const lineDiscountAmountArs = comboDiscount?.amountArs ?? 0;
+    const lineTotalAmountArs = Math.max(0, lineSubtotalAmountArs - lineDiscountAmountArs);
+
+    return {
+      id: input.idFactory ? input.idFactory() : randomUUID(),
+      orderId: input.orderId,
+      productId: item.productId,
+      productSlug: item.productSlug,
+      productName: item.productName,
+      productImageUrl: item.productImage?.src,
+      productImageAlt: item.productImage?.alt ?? "",
+      availability: item.availability,
+      availabilityLabel: item.availabilityLabel,
+      unitPriceAmountArs,
+      quantity: item.quantity,
+      variantLabel: item.variantLabel,
+      sizeLabel: item.sizeLabel,
+      lineTotalAmountArs,
+      itemSnapshot: {
+        productId: item.productId,
+        productSlug: item.productSlug,
+        productName: item.productName,
+        availability: item.availability,
+        availabilityLabel: item.availabilityLabel,
+        quantity: item.quantity,
+        unitPriceAmountArs,
+        lineTotalAmountArs,
+        comboDiscount: comboDiscount
+          ? {
+              amountArs: comboDiscount.amountArs,
+              reason: comboDiscount.reason,
+              pairedWithProductId: comboDiscount.pairedWithProductId,
+              pairedWithProductName: comboDiscount.pairedWithProductName,
+            }
+          : undefined,
+        variantLabel: item.variantLabel,
+        sizeLabel: item.sizeLabel,
+        productImage: item.productImage,
+      },
+    };
+  });
 }
 
 async function syncMissingCustomerProfileFieldsFromCheckout(
@@ -212,6 +307,7 @@ export async function createOrderFromCheckout(
       pricingSnapshot: {
         currencyCode: "ARS",
         subtotalAmountArs: pricing.subtotalAmountArs,
+        comboDiscountAmountArs: pricing.comboDiscountAmountArs,
         shippingAmountArs: pricing.shippingAmountArs,
         assistedFeeAmountArs: pricing.assistedFeeAmountArs,
         totalAmountArs: pricing.totalAmountArs,
@@ -219,41 +315,7 @@ export async function createOrderFromCheckout(
       updatedAt: new Date(),
     });
 
-    await tx.insert(orderItems).values(
-      payload.items.map((item) => {
-        const unitPriceAmountArs = getPriceAmount(item.priceDisplay);
-
-        return {
-          id: randomUUID(),
-          orderId,
-          productId: item.productId,
-          productSlug: item.productSlug,
-          productName: item.productName,
-          productImageUrl: item.productImage?.src,
-          productImageAlt: item.productImage?.alt ?? "",
-          availability: item.availability,
-          availabilityLabel: item.availabilityLabel,
-          unitPriceAmountArs,
-          quantity: item.quantity,
-          variantLabel: item.variantLabel,
-          sizeLabel: item.sizeLabel,
-          lineTotalAmountArs: unitPriceAmountArs * item.quantity,
-          itemSnapshot: {
-            productId: item.productId,
-            productSlug: item.productSlug,
-            productName: item.productName,
-            availability: item.availability,
-            availabilityLabel: item.availabilityLabel,
-            quantity: item.quantity,
-            unitPriceAmountArs,
-            lineTotalAmountArs: unitPriceAmountArs * item.quantity,
-            variantLabel: item.variantLabel,
-            sizeLabel: item.sizeLabel,
-            productImage: item.productImage,
-          },
-        };
-      }),
-    );
+    await tx.insert(orderItems).values(buildOrderItemRowsForPersistence({ payload, orderId, pricing }));
 
     await syncMissingCustomerProfileFieldsFromCheckout(tx, payload, customerAccountId);
   });

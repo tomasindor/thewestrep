@@ -264,7 +264,13 @@ export function ProductWhatsappCta({ product, visibleVariants }: ProductWhatsapp
                   : undefined,
                 availability: product.availability,
                 availabilityLabel: product.availabilityLabel,
+                categorySlug: product.category.slug,
                 priceDisplay: product.pricing.display,
+                comboEligible: product.comboEligible,
+                comboGroup: product.comboGroup,
+                comboPriority: product.comboPriority,
+                comboSourceKey: product.comboSourceKey,
+                comboScore: product.comboScore,
                 variantLabel: effectiveSelectedVariant,
                 sizeLabel: selectedSize,
               });
