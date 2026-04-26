@@ -62,6 +62,7 @@ export function CatalogFilters({
             preservedParams={{
               brand: activeFilters.brandId,
               category: activeFilters.categoryId,
+              promo: activeFilters.promoId,
             }}
             pendingCopy="Actualizando catálogo..."
           />

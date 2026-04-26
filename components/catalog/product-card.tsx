@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { ComboBadge } from "@/components/catalog/combo-badge";
 import { SmartImage } from "@/components/ui/smart-image";
 import { getProductPath, type CatalogProduct } from "@/lib/catalog/models";
 import { getProductImageUrlForContext } from "@/lib/media/product-images";
@@ -30,9 +31,10 @@ interface ProductCardProps {
   product: CatalogProduct;
   variant?: "default" | "home" | "related";
   contextAvailability?: CatalogProduct["availability"];
+  pairedProductName?: string;
 }
 
-export function ProductCard({ product, variant = "default", contextAvailability }: ProductCardProps) {
+export function ProductCard({ product, variant = "default", contextAvailability, pairedProductName }: ProductCardProps) {
   const detailHref = getProductPath(product);
   const isHomeCard = variant === "home";
   const isRelatedCard = variant === "related";
@@ -80,6 +82,7 @@ export function ProductCard({ product, variant = "default", contextAvailability 
                   {visibleBadge.label}
                 </span>
               ) : null}
+              <ComboBadge comboEligible={product.comboEligible} pairedProductName={pairedProductName} />
             </div>
           </div>
         ) : null}
