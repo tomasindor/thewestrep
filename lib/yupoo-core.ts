@@ -293,8 +293,10 @@ export async function extractYupooImages(sourceUrl: string, options?: { maxImage
   }
 
 const images = canonicalizeYupooImageCandidates(uniqueValues(Array.from(collected)));
-const maxImages = options?.maxImages ?? 30;
-const limitedImages = maxImages > 0 ? images.slice(0, maxImages) : images;
+const maxImages = options?.maxImages;
+const limitedImages = typeof maxImages === "number" && Number.isFinite(maxImages) && maxImages > 0
+  ? images.slice(0, maxImages)
+  : images;
 
   const imageCandidates: YupooImageCandidate[] = limitedImages.map((imageUrl) => {
     try {

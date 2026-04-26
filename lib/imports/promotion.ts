@@ -52,6 +52,10 @@ interface PromotionProductInput {
   type: "stock" | "encargue";
   priceArs: number;
   description: string;
+  comboEligible: boolean;
+  comboGroup: string | null;
+  comboPriority: number;
+  comboSourceKey: string | null;
   sourceUrl?: string;
   sizeGuide?: {
     title?: string;
@@ -240,6 +244,26 @@ function toPositiveNumber(value: unknown) {
     const parsed = Number(normalized);
     if (Number.isFinite(parsed) && parsed > 0) {
       return parsed;
+    }
+  }
+
+  return null;
+}
+
+function toIntegerOrNull(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.trunc(value);
+  }
+
+  if (typeof value === "string") {
+    const normalized = value.trim();
+    if (!normalized) {
+      return null;
+    }
+
+    const parsed = Number(normalized);
+    if (Number.isFinite(parsed)) {
+      return Math.trunc(parsed);
     }
   }
 
@@ -488,6 +512,12 @@ async function parsePromotionProductInput(
   );
 
   const type = context.productData.type === "stock" ? "stock" : "encargue";
+  const comboGroup = asTrimmedString(context.productData.comboGroup);
+  const comboEligible = context.productData.comboEligible === true && Boolean(comboGroup);
+  const comboPriority = comboEligible
+    ? (toIntegerOrNull(context.productData.comboPriority) ?? 0)
+    : 0;
+  const comboSourceKey = comboEligible ? asTrimmedString(context.productData.comboSourceKey) : null;
   const sourceUrl = typeof context.productData.sourceUrl === "string" && context.productData.sourceUrl.trim().length > 0
     ? context.productData.sourceUrl
     : undefined;
@@ -526,6 +556,10 @@ async function parsePromotionProductInput(
     type,
     priceArs: Number(priceArs),
     description,
+    comboEligible,
+    comboGroup,
+    comboPriority,
+    comboSourceKey,
     sourceUrl,
     sizeGuide: normalizedGuide
       ? {
@@ -636,19 +670,92 @@ function normalizeVariantManifestForStaging(manifest: ImageVariantsManifest | nu
   };
 }
 
+function extractErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function isStoragePermissionFailure(error: unknown, message: string) {
+  const candidate = message.toLowerCase();
+  if (/(access denied|accessdenied|forbidden|permission|403)/i.test(candidate)) {
+    return true;
+  }
+
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const withCode = error as {
+    code?: string;
+    Code?: string;
+    name?: string;
+    $metadata?: { httpStatusCode?: number };
+  };
+
+  const code = withCode.code ?? withCode.Code ?? withCode.name ?? "";
+  if (/(access.?denied|forbidden)/i.test(code)) {
+    return true;
+  }
+
+  return withCode.$metadata?.httpStatusCode === 403;
+}
+
+function formatDeferredMediaOperationError(input: {
+  operation: "download-source" | "store-original" | "generate-variants" | "store-variant";
+  sourceUrl: string;
+  assetKey?: string;
+  variantName?: CatalogImageVariantName;
+  error: unknown;
+}) {
+  const message = extractErrorMessage(input.error);
+  const operationLabel =
+    input.operation === "download-source"
+      ? "descargar imagen de origen"
+      : input.operation === "store-original"
+        ? "guardar original en R2"
+        : input.operation === "generate-variants"
+          ? "generar variantes de catálogo"
+          : `guardar variante \"${input.variantName ?? "desconocida"}\" en R2`;
+  const keyHint = input.assetKey ? ` (key: ${input.assetKey})` : "";
+
+  if (isStoragePermissionFailure(input.error, message)) {
+    return `Fallo de permisos en almacenamiento durante ${operationLabel}${keyHint}. Operación bloqueada por Access Denied/403. Verificá credenciales R2 (R2_ACCESS_KEY_ID/R2_SECRET_ACCESS_KEY), bucket configurado y permiso PutObject sobre el prefijo imports/promoted/. Detalle: ${message}`;
+  }
+
+  return `Falló ${operationLabel}${keyHint} para ${input.sourceUrl}: ${message}`;
+}
+
 async function ensureCatalogVariantsForImage(
   image: StagedImportImage,
   foundation: PromotionFoundation,
 ): Promise<ImageVariantsManifest> {
-  const sourceObject = await foundation.downloadSourceImage(image.sourceUrl);
+  let sourceObject: { body: Buffer; contentType?: string };
+  try {
+    sourceObject = await foundation.downloadSourceImage(image.sourceUrl);
+  } catch (error) {
+    throw new Error(formatDeferredMediaOperationError({
+      operation: "download-source",
+      sourceUrl: image.sourceUrl,
+      error,
+    }));
+  }
+
   const originalKey = buildPromotionOriginalKey(image.importItemId, image.order, image.sourceUrl, sourceObject.contentType);
 
-  await foundation.storeOriginalInR2({
-    key: originalKey,
-    body: sourceObject.body,
-    contentType: sourceObject.contentType ?? "image/jpeg",
-    sourceUrl: image.sourceUrl,
-  });
+  try {
+    await foundation.storeOriginalInR2({
+      key: originalKey,
+      body: sourceObject.body,
+      contentType: sourceObject.contentType ?? "image/jpeg",
+      sourceUrl: image.sourceUrl,
+    });
+  } catch (error) {
+    throw new Error(formatDeferredMediaOperationError({
+      operation: "store-original",
+      sourceUrl: image.sourceUrl,
+      assetKey: originalKey,
+      error,
+    }));
+  }
 
   const current = normalizeVariantManifestForStaging(image.variantsManifest ?? null, originalKey);
   const missing = REQUIRED_CATALOG_VARIANTS.filter((variantName) => {
@@ -656,19 +763,39 @@ async function ensureCatalogVariantsForImage(
     return !current.variants[field];
   });
 
-  const generated = await foundation.generateCatalogVariants({
-    source: sourceObject.body,
-    originalKey,
-  });
+  let generated: GenerateCatalogVariantsResult;
+  try {
+    generated = await foundation.generateCatalogVariants({
+      source: sourceObject.body,
+      originalKey,
+    });
+  } catch (error) {
+    throw new Error(formatDeferredMediaOperationError({
+      operation: "generate-variants",
+      sourceUrl: image.sourceUrl,
+      assetKey: originalKey,
+      error,
+    }));
+  }
 
   for (const variantName of missing) {
     const variant = generated.variants[variantName];
-    await foundation.storeVariantInR2({
-      key: variant.key,
-      body: variant.buffer,
-      contentType: variant.contentType,
-      sourceUrl: image.sourceUrl,
-    });
+    try {
+      await foundation.storeVariantInR2({
+        key: variant.key,
+        body: variant.buffer,
+        contentType: variant.contentType,
+        sourceUrl: image.sourceUrl,
+      });
+    } catch (error) {
+      throw new Error(formatDeferredMediaOperationError({
+        operation: "store-variant",
+        sourceUrl: image.sourceUrl,
+        assetKey: variant.key,
+        variantName,
+        error,
+      }));
+    }
 
     const field = mapVariantNameToManifestField(variantName);
     current.variants[field] = variant.key;
@@ -705,6 +832,10 @@ export async function copyToProducts(
       categoryId: productInput.categoryId,
       priceArs: productInput.priceArs,
       description: productInput.description,
+      comboEligible: productInput.comboEligible,
+      comboGroup: productInput.comboGroup,
+      comboPriority: productInput.comboPriority,
+      comboSourceKey: productInput.comboSourceKey,
       sourceUrl: productInput.sourceUrl ?? null,
       updatedAt: now,
     });
@@ -724,6 +855,10 @@ export async function copyToProducts(
     categoryId: productInput.categoryId,
     priceArs: productInput.priceArs,
     description: productInput.description,
+    comboEligible: productInput.comboEligible,
+    comboGroup: productInput.comboGroup,
+    comboPriority: productInput.comboPriority,
+    comboSourceKey: productInput.comboSourceKey,
     availabilityNote: "",
     whatsappCtaLabel: "",
     whatsappMessage: "",
@@ -981,7 +1116,7 @@ export function createPromotionFoundation(overrides: Partial<PromotionFoundation
 
 export function createPromotionFoundationFromDb(options: {
   db: {
-    query: Record<string, any>;
+    query: Record<string, unknown>;
     insert(table: unknown): { values(values: unknown): Promise<unknown> };
     update(table: unknown): { set(values: unknown): { where(predicate: unknown): Promise<unknown> } };
   };
@@ -993,13 +1128,41 @@ export function createPromotionFoundationFromDb(options: {
   const now = options.now ?? (() => new Date());
   const idFactory = options.idFactory ?? createId;
   const createStorage = options.createStorage ?? createR2StorageFromEnv;
+  const query = options.db.query as {
+    importItems: {
+      findFirst: (config: { where: unknown }) => Promise<{ id: string; status: string; productData: Record<string, unknown> | null; price: number | null } | undefined>;
+      findMany: (config: { orderBy: unknown[] }) => Promise<Array<{ id: string; status: string; productData: Record<string, unknown> | null; price: number | null }>>;
+    };
+    importImages: {
+      findMany: (config: { where: unknown; orderBy: unknown[] }) => Promise<Array<{
+        id: string;
+        importItemId: string;
+        sourceUrl: string;
+        order: number;
+        reviewState: ImportReviewState;
+        isSizeGuide: boolean;
+      }>>;
+    };
+    brands: {
+      findFirst: (config: { where: unknown }) => Promise<{ id: string } | undefined>;
+    };
+    categories: {
+      findFirst: (config: { where: unknown }) => Promise<{ id: string } | undefined>;
+    };
+    products: {
+      findFirst: (config: { where: unknown }) => Promise<{ id: string; slug: string; state: ProductState } | undefined>;
+    };
+    productSizeGuides: {
+      findFirst: (config: { where: unknown }) => Promise<{ productId: string } | undefined>;
+    };
+  };
 
   return createPromotionFoundation({
     now,
     idFactory,
     buildOwnedAssetUrl: options.buildOwnedAssetUrl ?? ((assetKey) => `r2://${assetKey}`),
     loadImportItemById: async (importItemId) => {
-      const row = await options.db.query.importItems.findFirst({ where: eq(importItems.id, importItemId) });
+      const row = await query.importItems.findFirst({ where: eq(importItems.id, importItemId) });
       if (!row) return null;
       return {
         id: row.id,
@@ -1009,17 +1172,10 @@ export function createPromotionFoundationFromDb(options: {
       };
     },
     loadImportImagesByItemId: async (importItemId) => {
-      const rows = await options.db.query.importImages.findMany({
+      const rows = await query.importImages.findMany({
         where: eq(importImages.importItemId, importItemId),
         orderBy: [asc(importImages.order)],
-      }) as Array<{
-        id: string;
-        importItemId: string;
-        sourceUrl: string;
-        order: number;
-        reviewState: ImportReviewState;
-        isSizeGuide: boolean;
-      }>;
+      });
 
       return rows.map((row) => ({
         id: row.id,
@@ -1032,9 +1188,9 @@ export function createPromotionFoundationFromDb(options: {
       }));
     },
     listEligibleImportItems: async ({ itemIds } = {}) => {
-      const rows = await options.db.query.importItems.findMany({
+      const rows = await query.importItems.findMany({
         orderBy: [asc(importItems.createdAt)],
-      }) as Array<{ id: string; status: string; productData: Record<string, unknown> | null; price: number | null }>;
+      });
 
       const allowedIds = itemIds ? new Set(itemIds) : null;
 
@@ -1055,7 +1211,7 @@ export function createPromotionFoundationFromDb(options: {
         return null;
       }
 
-      const row = await options.db.query.brands.findFirst({
+      const row = await query.brands.findFirst({
         where: sql`lower(${brands.name}) = lower(${normalizedName})`,
       });
       return row?.id ?? null;
@@ -1066,13 +1222,13 @@ export function createPromotionFoundationFromDb(options: {
         return null;
       }
 
-      const row = await options.db.query.categories.findFirst({
+      const row = await query.categories.findFirst({
         where: sql`lower(${categories.name}) = lower(${normalizedName})`,
       });
       return row?.id ?? null;
     },
     findProductBySlug: async (slug) => {
-      const row = await options.db.query.products.findFirst({ where: eq(products.slug, slug) });
+      const row = await query.products.findFirst({ where: eq(products.slug, slug) });
       if (!row) return null;
       return {
         id: row.id,
@@ -1100,7 +1256,7 @@ export function createPromotionFoundationFromDb(options: {
       await options.db.insert(productVariants).values(values);
     },
     upsertProductSizeGuide: async (values) => {
-      const existing = await options.db.query.productSizeGuides.findFirst({
+      const existing = await query.productSizeGuides.findFirst({
         where: eq(productSizeGuides.productId, values.productId),
       });
 

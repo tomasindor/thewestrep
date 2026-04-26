@@ -444,7 +444,6 @@ const deduped = canonicalizeYupooImageCandidates(collected);
 // 4. Construir array ordenado: preview → regulares → PNG/medidas
 const images: string[] = [];
 const usedUrls = new Set<string>();
-const MAX_IMAGES = 30;
 
 if (previewImage) {
 const previewKey = getYupooCanonicalKey(previewImage);
@@ -464,12 +463,7 @@ const remaining = deduped.filter((url) => !usedUrls.has(url));
 const regular = remaining.filter((url) => !shouldPushImageToEnd(url));
 const trailing = remaining.filter((url) => shouldPushImageToEnd(url));
 
-// Limitar a 30 imágenes en total (incluyendo preview)
-const availableSlots = MAX_IMAGES - images.length;
-const regularLimited = regular.slice(0, Math.max(0, availableSlots - Math.min(trailing.length, availableSlots)));
-const trailingLimited = trailing.slice(0, Math.max(0, availableSlots - regularLimited.length));
-
-images.push(...regularLimited, ...trailingLimited);
+images.push(...regular, ...trailing);
 
   const weidianUrl = extractWeidianUrlFromAlbumHtml(html);
 
@@ -821,14 +815,21 @@ interface ScrapedAlbum {
   href: string;
   albumId: string;
   price: number | null;
+  detectedPricesYuan: number[];
   rawName: string;
 }
 
-function parseAlbumFromTitle(title: string): { rawName: string; price: number | null } {
-  // Extraer primer precio del título
-  const priceMatch = title.match(/￥\s*(\d+)/);
-  const price = priceMatch ? parseInt(priceMatch[1], 10) : null;
-  return { rawName: title, price };
+function convertYuanToArs(priceYuan: number) {
+  return Math.round(priceYuan * 200 + 50000);
+}
+
+function parseAlbumFromTitle(title: string): { rawName: string; price: number | null; detectedPricesYuan: number[] } {
+  const detectedPricesYuan = Array.from(title.matchAll(/[¥￥]\s*(\d+)/g))
+    .map((match) => Number.parseInt(match[1] ?? "", 10))
+    .filter((value) => Number.isFinite(value) && value > 0)
+    .filter((value, index, values) => values.indexOf(value) === index);
+  const price = detectedPricesYuan[0] ?? null;
+  return { rawName: title, price, detectedPricesYuan };
 }
 
 async function sleep(ms: number) {
@@ -964,7 +965,9 @@ async function processAlbum(
     // 5. Normalizar datos económicos/base para staging
     const slug = `${slugify(productName)}-${album.albumId}`;
     const priceYuan = album.price ?? 0;
-    const priceArs = priceYuan > 0 ? priceYuan * 200 + 50000 : 0;
+    const detectedPrices = album.detectedPricesYuan.map(convertYuanToArs);
+    const priceArs = detectedPrices[0] ?? (priceYuan > 0 ? convertYuanToArs(priceYuan) : 0);
+    const hasTwoTitlePrices = album.detectedPricesYuan.length === 2;
 
     // 6. Ingestar a staging (shared pipeline)
     const ingestionInput = buildBulkIngestionInput({
@@ -984,6 +987,9 @@ async function processAlbum(
         variants,
         priceYuan,
         priceArs,
+        detectedPrices,
+        importerDetectedTwoTitlePrices: hasTwoTitlePrices,
+        detectedPricesSource: hasTwoTitlePrices ? "title" : undefined,
       },
     });
 

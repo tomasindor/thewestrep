@@ -40,3 +40,20 @@ test("extractYupooImages captures real preview/source URL pairs from album HTML"
     Object.defineProperty(globalThis, "fetch", { configurable: true, value: originalFetch });
   }
 });
+
+test("extractYupooImages no longer truncates albums to 30 images by default", async () => {
+  const originalFetch = globalThis.fetch;
+  const html = Array.from({ length: 35 }, (_, index) => `<img src="https://photo.yupoo.com/demo/albums/999/${index}/look-${index}.jpg" />`).join("\n");
+
+  Object.defineProperty(globalThis, "fetch", {
+    configurable: true,
+    value: async () => new Response(`<html><body>${html}</body></html>`, { status: 200 }),
+  });
+
+  try {
+    const extracted = await extractYupooImages("https://deateath.x.yupoo.com/albums/999?uid=1");
+    assert.equal(extracted.images.length, 35);
+  } finally {
+    Object.defineProperty(globalThis, "fetch", { configurable: true, value: originalFetch });
+  }
+});

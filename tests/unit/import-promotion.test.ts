@@ -279,6 +279,67 @@ test("promoteImportItem maps staging metadata fallbacks and resolves brand/categ
   assert.equal(created.priceArs, 129900);
 });
 
+test("promoteImportItem propagates combo metadata from staging into created products", async () => {
+  const fixture = createPromotionFixture();
+  fixture.service.loadImportItemById = async (importItemId) => ({
+    id: importItemId,
+    status: "approved",
+    price: 114900,
+    productData: {
+      name: "Look completo",
+      slug: "look-completo",
+      brandId: "brand-1",
+      categoryId: "category-1",
+      type: "encargue",
+      priceArs: 114900,
+      comboEligible: true,
+      comboGroup: "look-2026-01",
+      comboPriority: 2,
+      comboSourceKey: "importer-look",
+      comboScore: 0.91,
+    },
+  });
+
+  await promoteImportItem({ importItemId: "item-combo-metadata" }, fixture.service);
+
+  assert.equal(fixture.calls.createProduct.length, 1);
+  const created = fixture.calls.createProduct[0] as Record<string, unknown>;
+  assert.equal(created.comboEligible, true);
+  assert.equal(created.comboGroup, "look-2026-01");
+  assert.equal(created.comboPriority, 2);
+  assert.equal(created.comboSourceKey, "importer-look");
+});
+
+test("promoteImportItem keeps combo metadata conservative when staging data is incomplete", async () => {
+  const fixture = createPromotionFixture();
+  fixture.service.loadImportItemById = async (importItemId) => ({
+    id: importItemId,
+    status: "approved",
+    price: 114900,
+    productData: {
+      name: "Look parcial",
+      slug: "look-parcial",
+      brandId: "brand-1",
+      categoryId: "category-1",
+      type: "encargue",
+      priceArs: 114900,
+      comboEligible: true,
+      comboGroup: "",
+      comboPriority: "not-a-number",
+      comboSourceKey: "",
+    },
+  });
+
+  await promoteImportItem({ importItemId: "item-combo-incomplete" }, fixture.service);
+
+  assert.equal(fixture.calls.createProduct.length, 1);
+  const created = fixture.calls.createProduct[0] as Record<string, unknown>;
+  assert.equal(created.comboEligible, false);
+  assert.equal(created.comboGroup, null);
+  assert.equal(created.comboPriority, 0);
+  assert.equal(created.comboSourceKey, null);
+});
+
 test("promoteImportItem validates required metadata before any R2 upload or variant generation", async () => {
   const fixture = createPromotionFixture();
   fixture.service.loadImportItemById = async (importItemId) => ({
@@ -469,6 +530,27 @@ test("promoteImportItem marks explicit media-failed state when deferred variant 
 
   assert.equal(fixture.calls.markImportItemMediaFailed.length, 1);
   assert.equal(fixture.calls.markImportItemMediaFailed[0]?.importItemId, "item-fail");
+});
+
+test("promoteImportItem surfaces precise R2 permission error when storing deferred variants fails with Access Denied", async () => {
+  const fixture = createPromotionFixture();
+  fixture.service.storeVariantInR2 = async () => {
+    const error = new Error("Access Denied");
+    (error as Error & { name?: string }).name = "AccessDenied";
+    throw error;
+  };
+
+  await assert.rejects(
+    () => promoteImportItem({ importItemId: "item-access-denied" }, fixture.service),
+    /permisos en almacenamiento|putobject|Access Denied/i,
+  );
+
+  assert.equal(fixture.calls.markImportItemMediaFailed.length, 1);
+  const failed = fixture.calls.markImportItemMediaFailed[0];
+  assert.ok(failed);
+  assert.equal(failed?.importItemId, "item-access-denied");
+  assert.match(failed?.reason ?? "", /guardar variante/i);
+  assert.match(failed?.reason ?? "", /imports\/promoted\//i);
 });
 
 test("promoteImportItem marks items as consumed and blocks repeated promotion", async () => {
