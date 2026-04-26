@@ -15,6 +15,10 @@ import {
   getProductImagesSchemaCompatibilityWarning,
   type ProductImagesSchemaCompatibility,
 } from "../../lib/db/product-images-schema-compat";
+import {
+  getProductsSchemaCompatibilityWarning,
+  type ProductsSchemaCompatibility,
+} from "../../lib/db/products-schema-compat";
 
 test("schema exports staging import tables for jobs, items, and images", () => {
   assert.ok(importJobs.id);
@@ -70,6 +74,34 @@ test("product images schema compatibility does not warn when all managed columns
   };
 
   const warning = getProductImagesSchemaCompatibilityWarning(compatibility);
+
+  assert.equal(warning, undefined);
+});
+
+test("products schema compatibility warns when combo columns are missing", () => {
+  const compatibility: ProductsSchemaCompatibility = {
+    hasComboEligible: false,
+    hasComboGroup: true,
+    hasComboPriority: false,
+    hasComboSourceKey: true,
+  };
+
+  const warning = getProductsSchemaCompatibilityWarning(compatibility);
+
+  assert.ok(warning);
+  assert.match(warning, /combo_eligible/);
+  assert.match(warning, /combo_priority/);
+});
+
+test("products schema compatibility does not warn when combo columns exist", () => {
+  const compatibility: ProductsSchemaCompatibility = {
+    hasComboEligible: true,
+    hasComboGroup: true,
+    hasComboPriority: true,
+    hasComboSourceKey: true,
+  };
+
+  const warning = getProductsSchemaCompatibilityWarning(compatibility);
 
   assert.equal(warning, undefined);
 });

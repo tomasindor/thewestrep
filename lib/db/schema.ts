@@ -96,6 +96,7 @@ export const orders = pgTable("orders", {
     .$type<{
       currencyCode: "ARS";
       subtotalAmountArs: number;
+      comboDiscountAmountArs?: number;
       shippingAmountArs: number;
       assistedFeeAmountArs: number;
       totalAmountArs: number;
@@ -131,6 +132,12 @@ export const orderItems = pgTable("order_items", {
       quantity: number;
       unitPriceAmountArs: number;
       lineTotalAmountArs: number;
+      comboDiscount?: {
+        amountArs: number;
+        reason: string;
+        pairedWithProductId?: string;
+        pairedWithProductName?: string;
+      };
       variantLabel?: string;
       sizeLabel?: string;
       productImage?: {
@@ -183,6 +190,10 @@ export const products = pgTable("products", {
   availabilityNote: text("availability_note").notNull().default(""),
   whatsappCtaLabel: text("whatsapp_cta_label").notNull().default(""),
   whatsappMessage: text("whatsapp_message").notNull().default(""),
+  comboEligible: boolean("combo_eligible").notNull().default(false),
+  comboGroup: text("combo_group"),
+  comboPriority: integer("combo_priority").notNull().default(0),
+  comboSourceKey: text("combo_source_key"),
   state: productStateEnum("state").notNull().default("draft"),
   sourceUrl: text("source_url"),
   ...timestamps,
