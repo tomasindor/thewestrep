@@ -1,76 +1,216 @@
 ---
+
 name: git-delivery
 description: >
-  Safe commit, push, and pull request workflow for TheWestRep using gga review gates.
-  Trigger: committing changes, pushing branches, creating pull requests, or preparing work for review.
+Safe Git workflow for TheWestRep using Orca workspaces, isolated branches,
+gga review gates, and PR-based delivery.
 license: Apache-2.0
 metadata:
-  author: gentleman-programming
-  version: "1.0"
+author: gentleman-programming
+version: "2.0"
+---
+
+## Core Rule
+
+One workspace = one branch = one task.
+
+Never work directly on `main` or `master`.
+
 ---
 
 ## When to Use
 
-- Before creating a commit.
-- Before pushing a branch to `origin`.
-- Before opening or updating a pull request.
-- When the user says: commit, push, PR, pull request, subir cambios, crear PR, merge request, or release branch.
+Use this skill when the user says:
 
-## Critical Patterns
+* commit
+* push
+* PR
+* pull request
+* merge
+* branch
+* workspace
+* subir cambios
+* crear PR
+* unir a main
 
-1. **Verify before agreeing**: inspect `git status`, `git diff`, and recent `git log` before saying what will be committed.
-2. **Never commit secrets**: stop and warn if staged/untracked files look like `.env`, credentials, keys, tokens, dumps, or private config.
-3. **Use conventional commits only**: no `Co-Authored-By` trailers and no AI attribution.
-4. **Do not build**: this repo explicitly forbids running builds during agent workflows. Use lint/typecheck/tests instead.
-5. **Use `gga` as the review gate**: run `gga run` on staged changes before committing; run `gga run --pr-mode --diff-only` before creating a PR when branch-level review is needed.
-6. **Do not force-push unless the user explicitly asks**; never force-push `main`/`master`.
-7. **Use `gh` for GitHub operations**: PR creation, labels, checks, and issue lookup go through `gh`.
-8. **Respect this repo stack**: Next.js 16.2.1, React 19, TypeScript strict mode, native `node:test`, Playwright. If code changes are needed, read relevant `node_modules/next/dist/docs/` docs first.
+---
 
-## Repo-Specific Facts
+## Critical Rules
 
-| Area | Value |
-|------|-------|
-| Remote | `origin` -> `https://github.com/tomasindor/thewestrep.git` |
-| Working branch in this workspace | `login` |
-| Package manager | npm (`package-lock.json`) |
-| Lint command | `npm run lint` |
-| Typecheck command | `npm run typecheck` |
-| Unit tests | `npm run test:unit` |
-| E2E tests | `npm run e2e` when user explicitly asks or PR scope requires it |
-| Forbidden routine check | `npm run build` |
-| gga provider | Global config currently uses `opencode` |
-| gga rules file | `AGENTS.md` |
-
-## Commit Workflow
-
-### 1. Inspect repository state
+1. Always inspect Git state before acting:
 
 ```bash
 git status --short
+git branch --show-current
+git diff --stat
+git diff
+git log --oneline --decorate -5
+```
+
+2. If current branch is `main` or `master`, stop and create a feature branch.
+
+```bash
+git checkout -b feature/descriptive-name
+```
+
+3. Never commit directly to `main` or `master`.
+
+4. Each Orca workspace must use its own dedicated branch.
+
+Bad:
+
+```txt
+workspace-a → main
+workspace-b → main
+workspace-c → main
+```
+
+Good:
+
+```txt
+workspace-a → feature/product-card
+workspace-b → feature/hero-redesign
+workspace-c → fix/mobile-navbar
+```
+
+5. Never reuse the same branch across multiple active workspaces.
+
+6. Never commit secrets:
+
+Stop if files look like:
+
+```txt
+.env
+.env.local
+*.pem
+*.key
+credentials
+tokens
+database dumps
+private config
+```
+
+7. Stage files intentionally.
+
+Prefer:
+
+```bash
+git add app/products/ProductCard.tsx
+git add components/Hero.tsx
+```
+
+Avoid:
+
+```bash
+git add .
+```
+
+Only use `git add .` if the full diff was reviewed.
+
+8. Do not run builds.
+
+Forbidden:
+
+```bash
+npm run build
+```
+
+Allowed:
+
+```bash
+npm run lint
+npm run typecheck
+npm run test:unit
+```
+
+9. Run `gga` before committing.
+
+```bash
+gga run
+```
+
+10. Before PR, review branch diff with:
+
+```bash
+gga run --pr-mode --diff-only
+```
+
+11. Never force-push unless the user explicitly asks.
+
+Never force-push `main` or `master`.
+
+---
+
+## Workspace Start Workflow
+
+When starting a new Orca workspace:
+
+```bash
+git checkout main
+git pull origin main
+git status --short
+git checkout -b feature/descriptive-task-name
+```
+
+Branch naming:
+
+```txt
+feature/product-card-redesign
+feature/hero-promo-layout
+feature/yupoo-image-filtering
+fix/mobile-navbar
+fix/login-callback
+refactor/scraper-import-flow
+chore/update-git-workflow
+```
+
+---
+
+## Commit Workflow
+
+### 1. Inspect
+
+```bash
+git status --short
+git branch --show-current
 git diff --stat
 git diff
 git diff --staged
-git log --oneline -5
+git log --oneline --decorate -5
 ```
 
-Decide whether all changes belong in one commit. If unrelated changes are mixed, ask the user how to split them.
+If branch is `main` or `master`, stop.
 
-### 2. Choose verification commands
+### 2. Check for unrelated changes
 
-Use the smallest meaningful verification set:
+If changes are mixed, split them into separate commits or ask the user.
 
-| Change type | Commands |
-|-------------|----------|
-| TypeScript/server/client code | `npm run lint` + `npm run typecheck` + targeted/unit tests when available |
-| Tests only | `npm run test:unit` or the targeted test command |
-| Playwright/E2E behavior | `npm run e2e` only when scope requires it or user asks |
-| Docs/markdown only | No npm verification required; inspect diff carefully |
-| Scripts/data import logic | `npm run lint` + `npm run typecheck` + relevant script dry-run only if safe |
+Example:
 
-Do **not** run `npm run build`.
+```txt
+Commit 1: fix product card spacing
+Commit 2: refactor scraper image filtering
+```
 
-### 3. Stage intentionally
+### 3. Verify
+
+Choose based on change type:
+
+| Change type           | Commands                                  |
+| --------------------- | ----------------------------------------- |
+| UI / TS / React       | `npm run lint` + `npm run typecheck`      |
+| Server / DB / scripts | `npm run lint` + `npm run typecheck`      |
+| Unit tests touched    | `npm run test:unit`                       |
+| Docs only             | no npm command required                   |
+| E2E behavior          | `npm run e2e` only if needed or requested |
+
+Never run:
+
+```bash
+npm run build
+```
+
+### 4. Stage intentionally
 
 ```bash
 git add <specific-files>
@@ -78,42 +218,39 @@ git status --short
 git diff --staged
 ```
 
-Avoid `git add .` unless the diff was reviewed and every file is intentional.
-
-### 4. Run gga on staged files
+### 5. Run review gate
 
 ```bash
 gga run
 ```
 
-If `gga` reports issues:
+If `gga` fails:
 
 1. Fix real issues.
-2. Re-stage changed files.
+2. Re-stage.
 3. Re-run `gga run`.
-4. Only proceed when the review passes or the user explicitly accepts a known false positive.
+4. Continue only when clean.
 
-### 5. Commit
+### 6. Commit
 
-Use a message that explains intent, not mechanics.
+Use conventional commits:
 
 ```bash
-git commit -m "type(scope): concise reason"
+git commit -m "feat(products): improve streetwear product card"
+git commit -m "fix(hero): correct mobile carousel spacing"
+git commit -m "refactor(scraper): isolate yupoo image filtering"
 ```
 
 Allowed types:
 
-```text
-build, chore, ci, docs, feat, fix, perf, refactor, revert, style, test
+```txt
+feat, fix, refactor, chore, docs, style, test, perf, build, ci, revert
 ```
 
-Examples:
+No AI attribution.
+No `Co-Authored-By`.
 
-```bash
-git commit -m "fix(auth): preserve callback redirect after login"
-git commit -m "test(catalog): cover image fallback selection"
-git commit -m "docs(workflow): add gga delivery process"
-```
+---
 
 ## Push Workflow
 
@@ -126,35 +263,55 @@ git remote -v
 git log --oneline --decorate -5
 ```
 
-Rules:
-
-- Push feature branches with upstream tracking: `git push -u origin <branch>`.
-- If upstream already exists: `git push`.
-- Never push directly to `main`/`master` unless the user explicitly asks and you warn about the risk.
-- Never use `--force` or `--force-with-lease` unless explicitly requested.
-
-## Pull Request Workflow
-
-### 1. Review the full PR diff with gga
-
-```bash
-gga run --pr-mode --diff-only
-```
-
-Use plain `gga run --pr-mode` if the PR is small and full-file context is more valuable than speed.
-
-### 2. Push the branch
+If first push:
 
 ```bash
 git push -u origin <branch>
 ```
 
-### 3. Create PR with `gh`
-
-Use a HEREDOC body. Start from [assets/pr-body-template.md](assets/pr-body-template.md).
+If upstream already exists:
 
 ```bash
-gh pr create --title "type(scope): concise reason" --body "$(cat <<'EOF'
+git push
+```
+
+Never push directly to `main` unless the user explicitly asks and confirms the risk.
+
+---
+
+## PR Workflow
+
+### 1. Update against main
+
+```bash
+git fetch origin
+git rebase origin/main
+```
+
+If conflicts appear, resolve them in the feature branch.
+
+### 2. Run branch review
+
+```bash
+gga run --pr-mode --diff-only
+```
+
+### 3. Push
+
+```bash
+git push -u origin <branch>
+```
+
+If branch already exists:
+
+```bash
+git push
+```
+
+### 4. Create PR
+
+```bash
+gh pr create --title "feat(scope): concise reason" --body "$(cat <<'EOF'
 ## Summary
 -
 
@@ -169,67 +326,65 @@ EOF
 )"
 ```
 
-If this repository later adds PR templates, issue linkage, or required labels, follow those stricter rules.
-
-### 4. Check PR state
+### 5. Check PR
 
 ```bash
-gh pr view --web
 gh pr checks
 ```
 
-Report the PR URL and any failing checks.
+---
 
-## Decision Tree
+## Merge Safety Rule
 
-| Situation | Action |
-|----------|--------|
-| User asks “commit this” | Inspect status/diff/log, stage intentional files, run relevant verification, run `gga run`, commit. |
-| User asks “push” | Verify branch/remotes/status, ensure no uncommitted intended work, push safely. |
-| User asks “create PR” | Review branch diff, run `gga run --pr-mode --diff-only`, push if needed, create PR via `gh`. |
-| gga fails | Fix, re-stage, re-run. If ambiguous, ask user. |
-| Secrets detected | Stop. Do not stage/commit/push. Warn user. |
-| Mixed unrelated changes | Ask user whether to split commits. |
-| User requests force push | Confirm target branch and warn. Never force-push `main`/`master`. |
-
-## Commands
+Before merging to `main`:
 
 ```bash
-# gga setup/inspection
-gga config
-gga install
-gga install --commit-msg
-gga run
-gga run --no-cache
-gga run --pr-mode --diff-only
-
-# safe commit prep
-git status --short
-git diff
-git diff --staged
-git log --oneline -5
-
-# repo verification, never build
+git checkout main
+git pull origin main
+git merge --no-ff <branch>
 npm run lint
 npm run typecheck
-npm run test:unit
-
-# PRs
-git push -u origin <branch>
-gh pr create --title "type(scope): concise reason" --body "$(cat <<'EOF'
-## Summary
--
-
-## Verification
-- [x] gga run --pr-mode --diff-only
-
-## Risk
--
-EOF
-)"
-gh pr checks
+git push origin main
 ```
 
-## Resources
+Prefer GitHub PR merge instead of local merge.
 
-- **PR body template**: [assets/pr-body-template.md](assets/pr-body-template.md)
+---
+
+## Recovery Commands
+
+Abort rebase:
+
+```bash
+git rebase --abort
+```
+
+Abort merge:
+
+```bash
+git merge --abort
+```
+
+Check changed files against main:
+
+```bash
+git diff --name-only main...HEAD
+```
+
+See full branch diff:
+
+```bash
+git diff main...HEAD
+```
+
+Delete local branch after merge:
+
+```bash
+git branch -d <branch>
+```
+
+Delete remote branch after merge:
+
+```bash
+git push origin --delete <branch>
+```
