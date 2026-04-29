@@ -28,8 +28,13 @@ export const customerAccounts = pgTable("customer_accounts", {
   name: text("name").notNull().default(""),
   passwordHash: text("password_hash"),
   googleSubject: text("google_subject").unique(),
+  emailVerified: timestamp("email_verified", { withTimezone: true }),
+  verificationToken: text("verification_token"),
+  verificationTokenExpiresAt: timestamp("verification_token_expires_at", { withTimezone: true }),
   passwordResetToken: text("password_reset_token"),
   passwordResetExpiresAt: timestamp("password_reset_expires_at", { withTimezone: true }),
+  privacyConsentAcceptedAt: timestamp("privacy_consent_accepted_at", { withTimezone: true }),
+  privacyConsentVersion: text("privacy_consent_version"),
   phone: text("phone").notNull().default(""),
   preferredChannel: text("preferred_channel").notNull().default(""),
   cuil: text("cuil").notNull().default(""),
@@ -41,6 +46,21 @@ export const customerAccounts = pgTable("customer_accounts", {
   shippingPostalCode: text("shipping_postal_code").notNull().default(""),
   shippingDeliveryNotes: text("shipping_delivery_notes").notNull().default(""),
   ...timestamps,
+});
+
+export const customerSessions = pgTable("customer_sessions", {
+  id: text("id").primaryKey(),
+  customerId: text("customer_id")
+    .notNull()
+    .references(() => customerAccounts.id, { onDelete: "cascade" }),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  ...timestamps,
+});
+
+export const rateLimits = pgTable("rate_limits", {
+  key: text("key").primaryKey(),
+  points: integer("points").notNull().default(0),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
 });
 
 export const orders = pgTable("orders", {
@@ -289,6 +309,14 @@ export const brandRelations = relations(brands, ({ many }) => ({
 
 export const customerAccountRelations = relations(customerAccounts, ({ many }) => ({
   orders: many(orders),
+  sessions: many(customerSessions),
+}));
+
+export const customerSessionRelations = relations(customerSessions, ({ one }) => ({
+  customer: one(customerAccounts, {
+    fields: [customerSessions.customerId],
+    references: [customerAccounts.id],
+  }),
 }));
 
 export const categoryRelations = relations(categories, ({ many }) => ({
@@ -375,6 +403,8 @@ export const productSizeGuideRelations = relations(productSizeGuides, ({ one }) 
 export type BrandRecord = typeof brands.$inferSelect;
 export type CategoryRecord = typeof categories.$inferSelect;
 export type CustomerAccountRecord = typeof customerAccounts.$inferSelect;
+export type CustomerSessionRecord = typeof customerSessions.$inferSelect;
+export type RateLimitRecord = typeof rateLimits.$inferSelect;
 export type OrderItemRecord = typeof orderItems.$inferSelect;
 export type OrderRecord = typeof orders.$inferSelect;
 export type ProductRecord = typeof products.$inferSelect;

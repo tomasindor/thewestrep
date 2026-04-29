@@ -6,6 +6,7 @@ declare module "next-auth" {
       id: string;
       role: "admin" | "customer";
       authProvider?: "credentials" | "google";
+      emailVerified?: string | null;
     };
   }
 

@@ -1,10 +1,16 @@
 import "server-only";
 
+import { eq } from "drizzle-orm";
 import { getServerSession } from "next-auth";
-import { headers } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { authOptions } from "@/lib/auth";
+import { CUSTOMER_SESSION_COOKIE } from "@/lib/auth/customer-auth-route-handlers";
+import { resolveCustomerSession } from "@/lib/auth/customer-session-resolver";
+import { revokeCustomerSession, validateCustomerSession } from "@/lib/auth/customer-session";
+import { requireDb } from "@/lib/db/core";
+import { customerAccounts } from "@/lib/db/schema";
 import { isPlaywrightRuntime } from "@/lib/testing/playwright-runtime";
 
 async function isPlaywrightBypassEnabled() {
@@ -30,9 +36,19 @@ export async function getAdminSession() {
 }
 
 export async function getCustomerSession() {
-  const session = await getServerSession(authOptions);
-
-  return session?.user?.role === "customer" ? session : null;
+  return resolveCustomerSession({
+    getCookieToken: async () => {
+      const cookieStore = await cookies();
+      return cookieStore.get(CUSTOMER_SESSION_COOKIE)?.value ?? null;
+    },
+    validateSession: (token) => validateCustomerSession(token),
+    findAccountById: async (customerId) => {
+      const db = requireDb();
+      return (await db.query.customerAccounts.findFirst({ where: eq(customerAccounts.id, customerId) })) ?? null;
+    },
+    getNextAuthSession: async () => getServerSession(authOptions),
+    revokeSession: (token) => revokeCustomerSession(token),
+  });
 }
 
 export async function requireAdminSession() {

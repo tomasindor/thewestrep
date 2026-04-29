@@ -120,7 +120,7 @@ export function ResetPasswordForm({ token }: { token?: string }) {
 
     startTransition(async () => {
       try {
-        const response = await fetch("/api/customer-auth/reset-password", {
+        const response = await fetch("/api/customer/reset-password", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ token, newPassword: password }),

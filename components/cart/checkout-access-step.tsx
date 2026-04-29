@@ -11,6 +11,7 @@ export interface CheckoutAccessCustomerAuthState {
   name: string;
   email: string;
   authProvider: "credentials" | "google";
+  emailVerified?: string | null;
 }
 
 interface CheckoutAccessStepProps {
