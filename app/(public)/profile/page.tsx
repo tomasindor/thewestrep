@@ -1,14 +1,13 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { redirect } from "next/navigation";
 
-import { PublicFooter } from "@/components/layout/public-footer";
-import { PublicHeader } from "@/components/layout/public-header";
+import { HeaderConfigProvider } from "@/components/layout/header-config-context";
 import { CustomerProfileExperience } from "@/components/profile/customer-profile-experience";
 import { getCustomerProfileById } from "@/lib/auth/customer-profile";
 import { getCustomerSession } from "@/lib/auth/session";
 import { createPageMetadata } from "@/lib/seo";
 import { compactGhostCtaClassName } from "@/lib/ui";
+import Link from "next/link";
 
 export const metadata: Metadata = createPageMetadata({
   title: "Perfil",
@@ -16,12 +15,6 @@ export const metadata: Metadata = createPageMetadata({
   path: "/profile",
   keywords: ["perfil", "cuenta customer", "envío", "checkout"],
 });
-
-const profileNavItems = [
-  { href: "/catalogo", label: "Catálogos" },
-  { href: "/stock", label: "Stock" },
-  { href: "/checkout", label: "Checkout" },
-] as const;
 
 export default async function ProfilePage() {
   const customerSession = await getCustomerSession();
@@ -37,11 +30,14 @@ export default async function ProfilePage() {
   }
 
   return (
-    <div className="flex min-h-screen flex-1 flex-col">
-      <PublicHeader
-        navItems={profileNavItems}
-        homeLinkLabel="Volver al inicio de thewestrep"
-        actions={
+    <HeaderConfigProvider
+      config={{
+        navItems: [
+          { href: "/catalogo", label: "Catálogos" },
+          { href: "/stock", label: "Stock" },
+          { href: "/checkout", label: "Checkout" },
+        ],
+        actions: (
           <div className="flex flex-wrap gap-3">
             <Link href="/historial" className={compactGhostCtaClassName}>
               Ver historial
@@ -50,12 +46,10 @@ export default async function ProfilePage() {
               Volver al checkout
             </Link>
           </div>
-        }
-      />
-
+        ),
+      }}
+    >
       <CustomerProfileExperience initialProfile={profile} />
-
-      <PublicFooter />
-    </div>
+    </HeaderConfigProvider>
   );
 }

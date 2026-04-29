@@ -1,12 +1,10 @@
 import Link from "next/link";
 
-import { CatalogHeader } from "@/components/catalog/catalog-header";
 import { ComboRail } from "@/components/catalog/combo-rail";
 import { ProductBreadcrumb } from "@/components/catalog/product-breadcrumb";
 import { ProductImageGallery } from "@/components/catalog/product-image-gallery";
 import { RelatedProductsCarousel } from "@/components/catalog/related-products-carousel";
 import { ProductWhatsappCta } from "@/components/catalog/product-whatsapp-cta";
-import { PublicFooter } from "@/components/layout/public-footer";
 import { Container } from "@/components/ui/container";
 import { getCatalogFilterHref, getRelatedCatalogProducts, type CatalogProduct } from "@/lib/catalog";
 import { sanitizeJsonLd } from "@/lib/seo";
@@ -124,16 +122,13 @@ export async function ProductDetailPage({ product }: ProductDetailPageProps) {
   };
 
   return (
-    <main className="flex-1">
-      <div className="relative isolate">
-        <script
+    <div className="relative isolate">
+      <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{
             __html: sanitizeJsonLd(productJsonLd),
           }}
         />
-
-        <CatalogHeader />
 
         <section className="py-5 sm:py-6 lg:py-8">
           <Container className="space-y-8 sm:space-y-10 lg:space-y-12">
@@ -248,8 +243,6 @@ export async function ProductDetailPage({ product }: ProductDetailPageProps) {
           </Container>
         </section>
 
-        <PublicFooter />
-      </div>
-    </main>
+    </div>
   );
 }

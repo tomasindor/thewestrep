@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 
+import { HeaderConfigProvider } from "@/components/layout/header-config-context";
 import { HomePage } from "@/components/marketing/homepage";
 import { createPageMetadata } from "@/lib/seo";
 
@@ -25,8 +26,13 @@ export default async function Home({ searchParams }: HomePageRouteProps) {
   const resolvedSearchParams = await searchParams;
 
   return (
-    <main className="flex-1">
+    <HeaderConfigProvider
+      config={{
+        homeLinkHref: "#top",
+        homeLinkLabel: "Ir al inicio",
+      }}
+    >
       <HomePage heroPromoPreview={isHeroPromoPreviewEnabled(resolvedSearchParams.heroPromoPreview)} />
-    </main>
+    </HeaderConfigProvider>
   );
 }

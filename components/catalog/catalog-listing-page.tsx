@@ -2,10 +2,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import { CatalogFilters } from "@/components/catalog/catalog-filters";
-import { CatalogHeader } from "@/components/catalog/catalog-header";
 import { InfiniteProductGrid } from "@/components/catalog/infinite-product-grid";
 import { PromoBanner } from "@/components/catalog/promo-banner";
-import { PublicFooter } from "@/components/layout/public-footer";
 import { Container } from "@/components/ui/container";
 import {
   applyPromoPresetFilters,
@@ -108,104 +106,98 @@ export async function CatalogListingPage({ availability, searchParams, promoId }
   ].join(":");
 
   return (
-    <main className="flex-1">
-      <div className="relative isolate">
-        <CatalogHeader />
+    <div className="relative isolate">
+      <section className="py-12 sm:py-18">
+        <Container className="space-y-8">
+          {promoBanner ? (
+            <PromoBanner
+              title={promoBanner.title}
+              rules={promoBanner.rules}
+              disclosure={promoBanner.disclosure}
+            />
+          ) : null}
 
-        <section className="py-12 sm:py-18">
-          <Container className="space-y-8">
-            {promoBanner ? (
-              <PromoBanner
-                title={promoBanner.title}
-                rules={promoBanner.rules}
-                disclosure={promoBanner.disclosure}
-              />
-            ) : null}
-
-            <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-              <div className="space-y-4">
-                <p className="font-display text-sm tracking-[0.45em] text-[#f2d4dd]/78 uppercase">
-                  {content.eyebrow}
-                </p>
-                <h1 className="font-display max-w-4xl text-5xl leading-[0.9] text-white sm:text-7xl">
-                  {content.heading}
-                </h1>
-                <p className="max-w-2xl text-sm leading-6 text-slate-300 sm:text-lg sm:leading-7">
-                  {content.intro}
-                </p>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-3 lg:justify-end">
-                <Link
-                  href="/catalogo"
-                  className={`${compactGhostCtaClassName} px-5`}
-                >
-                  Ver ambos catálogos
-                </Link>
-              </div>
+          <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+            <div className="space-y-4">
+              <p className="font-display text-sm tracking-[0.45em] text-[#f2d4dd]/78 uppercase">
+                {content.eyebrow}
+              </p>
+              <h1 className="font-display max-w-4xl text-5xl leading-[0.9] text-white sm:text-7xl">
+                {content.heading}
+              </h1>
+              <p className="max-w-2xl text-sm leading-6 text-slate-300 sm:text-lg sm:leading-7">
+                {content.intro}
+              </p>
             </div>
 
-            <div className="flex flex-wrap items-center gap-3 text-sm text-slate-300">
-              <span className="rounded-full border border-white/10 bg-white/6 px-4 py-2 text-white">
-                {totalProducts.length} productos
-              </span>
-              <span className="rounded-full border border-white/10 bg-white/6 px-4 py-2 text-white">
-                {filterGroups.brands.filter((brand) => brand.count > 0).length} marcas
-              </span>
-              <span className="rounded-full border border-white/10 bg-white/6 px-4 py-2 text-white">
-                {filterGroups.categories.filter((category) => category.count > 0).length} prendas
-              </span>
-              <span>{content.statsCopy}</span>
+            <div className="flex flex-wrap items-center gap-3 lg:justify-end">
+              <Link
+                href="/catalogo"
+                className={`${compactGhostCtaClassName} px-5`}
+              >
+                Ver ambos catálogos
+              </Link>
             </div>
-          </Container>
-        </section>
+          </div>
 
-        <Container>
-          <CatalogFilters
-            availability={availability}
-            filterGroups={filterGroups}
-            activeFilters={activeFilters}
-            totalProducts={totalProducts.length}
-            totalResults={products.length}
-          />
+          <div className="flex flex-wrap items-center gap-3 text-sm text-slate-300">
+            <span className="rounded-full border border-white/10 bg-white/6 px-4 py-2 text-white">
+              {totalProducts.length} productos
+            </span>
+            <span className="rounded-full border border-white/10 bg-white/6 px-4 py-2 text-white">
+              {filterGroups.brands.filter((brand) => brand.count > 0).length} marcas
+            </span>
+            <span className="rounded-full border border-white/10 bg-white/6 px-4 py-2 text-white">
+              {filterGroups.categories.filter((category) => category.count > 0).length} prendas
+            </span>
+            <span>{content.statsCopy}</span>
+          </div>
         </Container>
+      </section>
 
-        <section className="py-8 sm:py-10">
-          <Container className="space-y-8">
-            {products.length > 0 ? (
-              <InfiniteProductGrid
-                key={gridKey}
-                products={products}
-                contextAvailability={availability}
-              />
-            ) : (
-              <div className="flex flex-col items-start gap-4 rounded-[1.75rem] border border-dashed border-white/12 bg-white/[0.03] p-6 sm:p-8">
-                <div className="space-y-2">
-                  <p className="text-xs font-medium tracking-[0.3em] text-[#f1d2dc]/75 uppercase">
-                    Sin resultados
-                  </p>
-                  <h3 className="font-display text-3xl leading-none text-white sm:text-4xl">
-                    {content.emptyTitle}
-                  </h3>
-                  <p className="max-w-xl text-sm leading-6 text-slate-300 sm:text-base">
-                    {content.emptyDescription}
-                  </p>
-                </div>
+      <Container>
+        <CatalogFilters
+          availability={availability}
+          filterGroups={filterGroups}
+          activeFilters={activeFilters}
+          totalProducts={totalProducts.length}
+          totalResults={products.length}
+        />
+      </Container>
 
-                <Link
-                  href={basePath}
-                  scroll={false}
-                  className={compactGhostCtaClassName}
-                >
-                  Ver todo
-                </Link>
+      <section className="py-8 sm:py-10">
+        <Container className="space-y-8">
+          {products.length > 0 ? (
+            <InfiniteProductGrid
+              key={gridKey}
+              products={products}
+              contextAvailability={availability}
+            />
+          ) : (
+            <div className="flex flex-col items-start gap-4 rounded-[1.75rem] border border-dashed border-white/12 bg-white/[0.03] p-6 sm:p-8">
+              <div className="space-y-2">
+                <p className="text-xs font-medium tracking-[0.3em] text-[#f1d2dc]/75 uppercase">
+                  Sin resultados
+                </p>
+                <h3 className="font-display text-3xl leading-none text-white sm:text-4xl">
+                  {content.emptyTitle}
+                </h3>
+                <p className="max-w-xl text-sm leading-6 text-slate-300 sm:text-base">
+                  {content.emptyDescription}
+                </p>
               </div>
-            )}
-          </Container>
-        </section>
 
-        <PublicFooter />
-      </div>
-    </main>
+              <Link
+                href={basePath}
+                scroll={false}
+                className={compactGhostCtaClassName}
+              >
+                Ver todo
+              </Link>
+            </div>
+          )}
+        </Container>
+      </section>
+    </div>
   );
 }
