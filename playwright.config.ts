@@ -24,6 +24,7 @@ export default defineConfig({
     env: {
       NEXT_TELEMETRY_DISABLED: "1",
       PLAYWRIGHT: "1",
+      DATABASE_URL: "postgres://playwright:playwright@127.0.0.1:5432/playwright",
     },
   },
   projects: [

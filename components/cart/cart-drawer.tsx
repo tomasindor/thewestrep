@@ -6,6 +6,7 @@ import { useEffect } from "react";
 import { trackComboEvent } from "@/lib/analytics/combo-events";
 import { useCart } from "@/components/cart/cart-provider";
 import { SmartImage } from "@/components/ui/smart-image";
+import { buildAuthEntryHref } from "@/lib/auth/customer-auth-navigation";
 import { getCorreoArgentinoFeeTotal, hasEncargueItems } from "@/lib/cart/assisted-orders";
 import { getProductImageUrlForContext } from "@/lib/media/product-images";
 import { getPriceAmount } from "@/lib/orders/checkout.shared";
@@ -27,6 +28,7 @@ const accentSurfaceClassName = "border-[rgba(210,138,163,0.2)] bg-[rgba(210,138,
 
 export function CartDrawer() {
   const { closeCart, clearCart, isHydrated, isOpen, itemCount, items, removeItem, updateQuantity } = useCart();
+  const checkoutLoginHref = buildAuthEntryHref("/login", "/checkout");
   const hasEncargueOrder = hasEncargueItems(items);
   const correoArgentinoFeeTotal = getCorreoArgentinoFeeTotal(items);
   const comboPricing = calculateComboPricing(items.map((item) => ({
@@ -141,7 +143,7 @@ export function CartDrawer() {
                   </p>
                 ))}
               </div>
-              <Link href="/login" onClick={handleClose} className="text-sm text-slate-300 transition hover:text-white">
+              <Link href={checkoutLoginHref} onClick={handleClose} className="text-sm text-slate-300 transition hover:text-white">
                 Resolver acceso
               </Link>
             </section>
@@ -235,7 +237,7 @@ export function CartDrawer() {
         </div>
 
         <div className="border-t border-white/10 px-5 py-4 sm:px-6">
-          <Link href={items.length > 0 ? "/login" : "/catalogo"} onClick={handleClose} className={`${solidCtaClassName} w-full`}>
+          <Link href={items.length > 0 ? checkoutLoginHref : "/catalogo"} onClick={handleClose} className={`${solidCtaClassName} w-full`}>
             {items.length === 0 ? "Explorar catálogo" : "Continuar compra"}
           </Link>
 

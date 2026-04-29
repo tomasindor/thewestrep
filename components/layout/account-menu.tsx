@@ -22,6 +22,9 @@ function AccountIcon() {
 const menuLinkClassName =
   "flex min-h-11 items-center rounded-[1rem] border border-white/8 bg-black/20 px-4 py-3 text-sm text-slate-200 transition hover:border-[rgba(210,138,163,0.34)] hover:text-white";
 
+const menuButtonClassName =
+  "flex min-h-11 w-full items-center justify-center rounded-[1rem] border border-white/8 bg-black/20 px-4 py-3 text-sm text-slate-200 transition hover:border-[rgba(210,138,163,0.34)] hover:text-white";
+
 export function AccountMenu({ greeting, isLoggedIn }: AccountMenuProps) {
   const pathname = usePathname();
   const items = isLoggedIn
@@ -65,6 +68,14 @@ export function AccountMenu({ greeting, isLoggedIn }: AccountMenuProps) {
               </Link>
             );
           })}
+
+          {isLoggedIn ? (
+            <form action="/api/customer/logout?returnUrl=/login" method="post">
+              <button type="submit" className={menuButtonClassName}>
+                Cerrar sesión
+              </button>
+            </form>
+          ) : null}
         </div>
       </div>
     </details>

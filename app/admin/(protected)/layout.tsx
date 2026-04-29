@@ -1,7 +1,10 @@
 import Link from "next/link";
+import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 
 import { LogoutButton } from "@/components/admin/logout-button";
-import { requireAdminSession } from "@/lib/auth/session";
+import { hasCustomerSessionCookie, shouldBlockAdminLogin } from "@/lib/auth/admin-boundary";
+import { getAdminSession, requireAdminSession } from "@/lib/auth/session";
 import { eyebrowAccentClassName, navLinkClassName } from "@/lib/ui";
 
 const adminNavItems = [
@@ -12,6 +15,13 @@ const adminNavItems = [
 ];
 
 export default async function AdminProtectedLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+  const [adminSession, cookieStore] = await Promise.all([getAdminSession(), cookies()]);
+  const hasCustomerSession = hasCustomerSessionCookie(cookieStore.toString());
+
+  if (shouldBlockAdminLogin({ hasAdminSession: Boolean(adminSession?.user), hasCustomerSession })) {
+    redirect("/admin/login?error=customer-session");
+  }
+
   await requireAdminSession();
 
   return (

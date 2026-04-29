@@ -2,12 +2,14 @@
 
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
-import { signIn, signOut } from "next-auth/react";
+import { signOut } from "next-auth/react";
 import { useRouter } from "next/navigation";
 
 import { useCart } from "@/components/cart/cart-provider";
 import type { CheckoutAccessCustomerAuthState } from "@/components/cart/checkout-access-step";
+import { executeCustomerCredentialsFlow } from "@/lib/auth/customer-auth-client";
 import { customerLoginSchema, customerRegistrationFormSchema } from "@/lib/auth/customer-credentials";
+import { sanitizeAuthReturnUrl } from "@/lib/auth/customer-auth-navigation";
 import { compactGhostCtaClassName, ghostCtaClassName, inputClassName, solidCtaClassName } from "@/lib/ui";
 
 interface AccessFormErrors {
@@ -22,6 +24,9 @@ interface CustomerLoginExperienceProps {
   isEmailAuthEnabled: boolean;
   isGoogleAuthEnabled: boolean;
   shouldAutoAdvanceGoogleAccess: boolean;
+  returnUrl?: string;
+  initialMode?: "login" | "register";
+  oauthError?: string;
 }
 
 function GoogleMark() {
@@ -40,10 +45,14 @@ export function CustomerLoginExperience({
   isEmailAuthEnabled,
   isGoogleAuthEnabled,
   shouldAutoAdvanceGoogleAccess,
+  returnUrl,
+  initialMode = "login",
+  oauthError,
 }: CustomerLoginExperienceProps) {
   const router = useRouter();
   const { customer, updateCustomer } = useCart();
-  const [mode, setMode] = useState<"login" | "register">("login");
+  const safeReturnUrl = useMemo(() => sanitizeAuthReturnUrl(returnUrl, "/"), [returnUrl]);
+  const [mode, setMode] = useState<"login" | "register">(initialMode);
   const [name, setName] = useState(customerAuth?.authProvider === "credentials" ? customerAuth.name : customer.name);
   const [email, setEmail] = useState(
     customerAuth?.authProvider === "credentials" ? customerAuth.email : customer.email,
@@ -64,17 +73,13 @@ export function CustomerLoginExperience({
   const isGoogleConnected = customerAuth?.authProvider === "google";
   const isEmailConnected = customerAuth?.authProvider === "credentials";
 
-  const nextStepLabel = useMemo(() => {
-    return customer.checkoutMode === "guest" ? "Entrar como invitado" : "Entrar con cuenta";
-  }, [customer.checkoutMode]);
-
   const goToCheckout = useCallback(() => {
-    router.push("/checkout");
-  }, [router]);
+    router.push(safeReturnUrl);
+  }, [router, safeReturnUrl]);
 
   const startGoogleCustomerSignIn = useCallback(() => {
-    void signIn("google", { callbackUrl: "/login?access=google" }, { prompt: "select_account" });
-  }, []);
+    window.location.href = `/api/customer-auth/google?returnUrl=${encodeURIComponent(safeReturnUrl)}`;
+  }, [safeReturnUrl]);
 
   const resolveGuestAccess = () => {
     updateCustomer("checkoutMode", "guest");
@@ -117,17 +122,14 @@ export function CustomerLoginExperience({
   };
 
   return (
-    <main className="flex flex-1 items-center justify-center px-6 py-12 sm:px-8 sm:py-16">
+    <main className="flex flex-1 items-center justify-center px-6 py-6 sm:px-8 sm:py-8">
       <div className="w-full max-w-md">
-        <section className="rounded-[2rem] border border-white/10 bg-[linear-gradient(180deg,rgba(17,20,28,0.98),rgba(7,9,14,0.99))] p-5 shadow-[0_36px_120px_rgba(0,0,0,0.55)] ring-1 ring-white/8 sm:p-7">
+        <section className="rounded-[2rem] border border-white/10 bg-[linear-gradient(180deg,rgba(17,20,28,0.98),rgba(7,9,14,0.99))] p-5 shadow-[0_36px_120px_rgba(0,0,0,0.55)] ring-1 ring-white/8 sm:p-6">
           <div className="space-y-2 text-center">
             <h1 className="text-3xl font-semibold text-white sm:text-[2rem]">Entrá a tu cuenta</h1>
-            <p className="text-sm leading-6 text-slate-400">
-              Elegí si querés iniciar sesión, crear tu cuenta o entrar con Google antes de pasar al checkout.
-            </p>
           </div>
 
-          <div className="mt-6 space-y-6">
+          <div className="mt-5 space-y-4">
             {showForgotPassword ? (
               <div className="space-y-4">
                 <div className="space-y-2 text-center">
@@ -159,7 +161,7 @@ export function CustomerLoginExperience({
                       setForgotPending(true);
 
                       try {
-                        const response = await fetch("/api/customer-auth/forgot-password", {
+                        const response = await fetch("/api/customer/forgot-password", {
                           method: "POST",
                           headers: { "Content-Type": "application/json" },
                           body: JSON.stringify({ email: forgotEmail }),
@@ -271,16 +273,64 @@ export function CustomerLoginExperience({
                     event.preventDefault();
                     setSubmitError(null);
 
-                    const validatedFields =
-                      mode === "register"
-                        ? customerRegistrationFormSchema.safeParse({ name, email, password, confirmPassword })
-                        : customerLoginSchema.safeParse({ email, password });
+                    if (mode === "register") {
+                      const validatedRegistration = customerRegistrationFormSchema.safeParse({
+                        name,
+                        email,
+                          password,
+                          confirmPassword,
+                        });
 
-                    if (!validatedFields.success) {
-                      setErrors(validatedFields.error.flatten().fieldErrors);
+                      if (!validatedRegistration.success) {
+                        setErrors(validatedRegistration.error.flatten().fieldErrors);
+                        return;
+                      }
+
+                      const { data } = validatedRegistration;
+                      setErrors({});
+
+                      startTransition(async () => {
+                        if (!isEmailAuthEnabled) {
+                          setSubmitError("El acceso por email todavía no está disponible en este entorno.");
+                          return;
+                        }
+
+                        const flowResult = await executeCustomerCredentialsFlow({
+                          mode: "register",
+                          name: data.name,
+                          email: data.email,
+                          password: data.password,
+                          returnUrl: safeReturnUrl,
+                        });
+
+                        if (!flowResult.ok) {
+                          setSubmitError(flowResult.error);
+
+                          if (flowResult.code === "duplicate_email" || flowResult.code === "google_account_exists") {
+                            setName("");
+                            setEmail("");
+                            setPassword("");
+                            setConfirmPassword("");
+                            setErrors({});
+                          }
+
+                          return;
+                        }
+
+                        router.push(flowResult.redirectTo);
+                      });
+
                       return;
                     }
 
+                    const validatedLogin = customerLoginSchema.safeParse({ email, password });
+
+                    if (!validatedLogin.success) {
+                      setErrors(validatedLogin.error.flatten().fieldErrors);
+                      return;
+                    }
+
+                    const { data } = validatedLogin;
                     setErrors({});
 
                     startTransition(async () => {
@@ -289,45 +339,20 @@ export function CustomerLoginExperience({
                         return;
                       }
 
-                      if (mode === "register" && "name" in validatedFields.data) {
-                        const response = await fetch("/api/customer-auth/register", {
-                          method: "POST",
-                          headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({
-                            name: validatedFields.data.name,
-                            email: validatedFields.data.email,
-                            password: validatedFields.data.password,
-                          }),
-                        });
-                        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
-
-                        if (!response.ok) {
-                          setSubmitError(payload?.error ?? "No pudimos crear tu cuenta ahora.");
-                          return;
-                        }
-                      }
-
-                      const result = await signIn("customer-credentials", {
-                        email: validatedFields.data.email,
-                        password: validatedFields.data.password,
-                        redirect: false,
-                        callbackUrl: "/checkout",
+                      const flowResult = await executeCustomerCredentialsFlow({
+                        mode: "login",
+                        name: "",
+                        email: data.email,
+                        password: data.password,
+                        returnUrl: safeReturnUrl,
                       });
 
-                      if (result?.error) {
-                        setSubmitError(
-                          mode === "register"
-                            ? "La cuenta se creó, pero no pudimos abrir la sesión automáticamente. Probá entrar de nuevo."
-                            : "No encontramos una cuenta customer válida con ese email y contraseña.",
-                        );
+                      if (!flowResult.ok) {
+                        setSubmitError(flowResult.error);
                         return;
                       }
 
-                      resolveAuthenticatedAccess(
-                        "credentials",
-                        mode === "register" ? name.trim() : customerAuth?.name ?? "",
-                        validatedFields.data.email,
-                      );
+                      resolveAuthenticatedAccess("credentials", customerAuth?.name ?? "", data.email);
                     });
                   }}
                 >
@@ -393,19 +418,20 @@ export function CustomerLoginExperience({
                   ) : null}
 
                   {submitError ? <p className="text-sm text-red-200">{submitError}</p> : null}
+                  {oauthError ? <p className="text-sm text-red-200">No se pudo iniciar sesión con Google.</p> : null}
 
                   <button
                     type="submit"
                     disabled={isPending || !isEmailAuthEnabled}
-                    className={`${solidCtaClassName} w-full disabled:pointer-events-none disabled:opacity-45`}
+                    className={`${solidCtaClassName} mt-2 w-full disabled:pointer-events-none disabled:opacity-45`}
                   >
                     {isPending
                       ? mode === "register"
                         ? "Creando cuenta..."
                         : "Entrando..."
                       : mode === "register"
-                        ? "Crear cuenta y continuar"
-                        : "Entrar y continuar"}
+                        ? "Crear cuenta"
+                        : "Iniciar sesión"}
                   </button>
 
                   {mode === "login" && isEmailAuthEnabled && (
@@ -424,8 +450,8 @@ export function CustomerLoginExperience({
                     {!isEmailAuthEnabled
                       ? "Falta una base de datos disponible para persistir cuentas customer. Mientras tanto, seguí con Google o como invitado."
                       : mode === "register"
-                        ? "Creamos tu cuenta customer y te dejamos adentro en el mismo paso."
-                        : "Entrás con tu cuenta y el checkout retoma tu identidad customer al instante."}
+                        ? "Creamos tu cuenta y te enviamos un email para verificarla antes de comprar."
+                        : "Entrá con tu cuenta para continuar en un solo paso."}
                   </p>
                 </form>
               </>
@@ -439,22 +465,23 @@ export function CustomerLoginExperience({
                 </div>
 
                 <div className="space-y-3">
-                  <button
-                    type="button"
-                    disabled={!isGoogleConnected && !isGoogleAuthEnabled}
-                    onClick={() => {
-                      if (isGoogleConnected) {
-                        resolveAuthenticatedAccess("google", customerAuth?.name ?? "", customerAuth?.email ?? "");
-                        return;
-                      }
+                  {(isGoogleConnected || isGoogleAuthEnabled) ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (isGoogleConnected) {
+                          resolveAuthenticatedAccess("google", customerAuth?.name ?? "", customerAuth?.email ?? "");
+                          return;
+                        }
 
-                      startGoogleCustomerSignIn();
-                    }}
-                    className={`${ghostCtaClassName} w-full gap-3 disabled:pointer-events-none disabled:opacity-45`}
-                  >
-                    <GoogleMark />
-                    <span>{isGoogleConnected ? "Continuar con esta cuenta de Google" : "Continuar con Google"}</span>
-                  </button>
+                        startGoogleCustomerSignIn();
+                      }}
+                      className={`${ghostCtaClassName} w-full gap-3`}
+                    >
+                      <GoogleMark />
+                      <span>{isGoogleConnected ? "Continuar con esta cuenta de Google" : "Continuar con Google"}</span>
+                    </button>
+                  ) : null}
 
                   {isGoogleConnected ? (
                     <button
@@ -469,7 +496,7 @@ export function CustomerLoginExperience({
                   ) : (
                     <p className="text-center text-sm text-slate-400">
                       {isGoogleAuthEnabled
-                        ? "Google abre el login real de NextAuth, vuelve a esta pantalla y continúa con tu identidad customer."
+                        ? "Google inicia sesión y vuelve con tu cuenta customer automáticamente."
                         : "Google no está disponible en este entorno por ahora."}
                     </p>
                   )}
@@ -484,10 +511,6 @@ export function CustomerLoginExperience({
                     Volver al catálogo
                   </Link>
                 </div>
-
-                <p className="text-center text-xs leading-5 text-slate-500">
-                  Estado del acceso: {nextStepLabel}. El acceso admin sigue separado en /admin/login.
-                </p>
               </>
             )}
           </div>

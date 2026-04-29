@@ -17,7 +17,7 @@ export async function POST(
     pathSegments.includes("callback") && pathSegments.includes("credentials");
 
   if (isCredentials) {
-    const rateLimit = applyRateLimit(request, "login-credentials", {
+    const rateLimit = await applyRateLimit(request, "login-credentials", {
       maxRequests: 5,
       windowMs: 5 * 60 * 1000,
     });

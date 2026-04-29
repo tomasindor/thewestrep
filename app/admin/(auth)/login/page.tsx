@@ -1,16 +1,25 @@
 import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
 
 import { LoginForm } from "@/components/admin/login-form";
+import { hasCustomerSessionCookie, shouldBlockAdminLogin } from "@/lib/auth/admin-boundary";
 import { getAdminSession } from "@/lib/auth/session";
+import { compactGhostCtaClassName, ghostCtaClassName } from "@/lib/ui";
 
 export const dynamic = "force-dynamic";
 
 export default async function AdminLoginPage() {
-  const session = await getAdminSession();
+  const [session, cookieStore] = await Promise.all([getAdminSession(), cookies()]);
+  const hasCustomerSession = hasCustomerSessionCookie(cookieStore.toString());
 
   if (session?.user) {
     redirect("/admin/products");
   }
+
+  const isBlockedByCustomerSession = shouldBlockAdminLogin({
+    hasAdminSession: Boolean(session?.user),
+    hasCustomerSession,
+  });
 
   return (
     <main className="flex min-h-screen items-center justify-center px-4 py-10">
@@ -22,7 +31,26 @@ export default async function AdminLoginPage() {
             Un solo usuario admin, sesión privada dentro del mismo sitio y WhatsApp como CTA pública.
           </p>
         </div>
-        <LoginForm />
+
+        {isBlockedByCustomerSession ? (
+          <div className="space-y-4 rounded-[1.1rem] border border-amber-300/30 bg-amber-500/10 p-4 text-sm text-amber-100">
+            <p className="font-semibold text-amber-50">Sesión customer detectada</p>
+            <p>
+              Para mantener la separación admin/customer, primero cerrá la sesión customer y recién ahí iniciá sesión
+              admin.
+            </p>
+            <form action="/api/customer/logout?returnUrl=/admin/login" method="post">
+              <button type="submit" className={ghostCtaClassName}>
+                Cerrar sesión customer
+              </button>
+            </form>
+            <a href="/login" className={compactGhostCtaClassName}>
+              Ir al login de clientes
+            </a>
+          </div>
+        ) : (
+          <LoginForm />
+        )}
       </section>
     </main>
   );

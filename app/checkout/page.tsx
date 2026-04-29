@@ -1,11 +1,13 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 
 import { CheckoutExperience } from "@/components/cart/checkout-experience";
 import { PublicFooter } from "@/components/layout/public-footer";
 import { PublicHeader } from "@/components/layout/public-header";
 import { getCustomerProfileById } from "@/lib/auth/customer-profile";
 import { getCustomerSession } from "@/lib/auth/session";
+import { shouldRedirectCheckoutToVerifyEmail } from "@/lib/orders/checkout-verification-gate";
 import { createPageMetadata } from "@/lib/seo";
 import { compactGhostCtaClassName } from "@/lib/ui";
 
@@ -25,6 +27,19 @@ const checkoutNavItems = [
 
 export default async function CheckoutPage() {
   const customerSession = await getCustomerSession();
+
+  const verifyRedirect = customerSession?.user
+    ? shouldRedirectCheckoutToVerifyEmail({
+      checkoutMode: "account",
+      emailVerified: customerSession.user.emailVerified,
+      returnUrl: "/checkout",
+    })
+    : null;
+
+  if (verifyRedirect) {
+    redirect(verifyRedirect);
+  }
+
   const customerProfile = customerSession?.user?.id ? await getCustomerProfileById(customerSession.user.id).catch(() => null) : null;
 
   return (
@@ -47,6 +62,7 @@ export default async function CheckoutPage() {
                 name: customerSession.user.name ?? "",
                 email: customerSession.user.email ?? "",
                 authProvider: customerSession.user.authProvider ?? "credentials",
+                emailVerified: customerSession.user.emailVerified ?? null,
               }
             : null
         }
