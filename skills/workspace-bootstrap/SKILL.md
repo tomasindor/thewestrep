@@ -95,6 +95,7 @@ Recommended pattern:
 git checkout main
 git pull origin main
 git worktree add ../thewestrep-product-card -b feature/product-card-redesign
+cp ../.env.local ../thewestrep-product-card/.env.local
 ```
 
 Then open the new folder in Orca:
@@ -126,8 +127,11 @@ Example:
 
 ```bash
 git worktree add ../thewestrep-hero-promo -b feature/hero-promo-layout
+cp ../.env.local ../thewestrep-hero-promo/.env.local
 git worktree add ../thewestrep-mobile-navbar -b fix/mobile-navbar
+cp ../.env.local ../thewestrep-mobile-navbar/.env.local
 git worktree add ../thewestrep-yupoo-filtering -b feature/yupoo-image-filtering
+cp ../.env.local ../thewestrep-yupoo-filtering/.env.local
 ```
 
 ---
@@ -154,6 +158,7 @@ After creating the workspace:
 git branch --show-current
 git status --short
 pwd
+test -f .env.local && echo "env OK" || echo "MISSING .env.local"
 ```
 
 Expected:
@@ -162,6 +167,7 @@ Expected:
 branch: feature/descriptive-task-name
 status: clean
 folder: dedicated workspace folder
+env: .env.local present
 ```
 
 ---
