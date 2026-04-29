@@ -3,8 +3,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { CheckoutExperience } from "@/components/cart/checkout-experience";
-import { PublicFooter } from "@/components/layout/public-footer";
-import { PublicHeader } from "@/components/layout/public-header";
+import { HeaderConfigProvider } from "@/components/layout/header-config-context";
 import { getCustomerProfileById } from "@/lib/auth/customer-profile";
 import { getCustomerSession } from "@/lib/auth/session";
 import { shouldRedirectCheckoutToVerifyEmail } from "@/lib/orders/checkout-verification-gate";
@@ -18,12 +17,6 @@ export const metadata: Metadata = createPageMetadata({
   path: "/checkout",
   keywords: ["checkout", "carrito", "compra streetwear"],
 });
-
-const checkoutNavItems = [
-  { href: "/catalogo", label: "Catálogos" },
-  { href: "/stock", label: "Stock" },
-  { href: "/encargue", label: "Encargue" },
-] as const;
 
 export default async function CheckoutPage() {
   const customerSession = await getCustomerSession();
@@ -43,17 +36,20 @@ export default async function CheckoutPage() {
   const customerProfile = customerSession?.user?.id ? await getCustomerProfileById(customerSession.user.id).catch(() => null) : null;
 
   return (
-    <div className="flex min-h-screen flex-1 flex-col">
-      <PublicHeader
-        navItems={checkoutNavItems}
-        homeLinkLabel="Volver al inicio de thewestrep"
-        actions={
+    <HeaderConfigProvider
+      config={{
+        navItems: [
+          { href: "/catalogo", label: "Catálogos" },
+          { href: "/stock", label: "Stock" },
+          { href: "/encargue", label: "Encargue" },
+        ],
+        actions: (
           <Link href="/catalogo" className={compactGhostCtaClassName}>
             Seguir comprando
           </Link>
-        }
-      />
-
+        ),
+      }}
+    >
       <CheckoutExperience
         customerProfile={customerProfile}
         customerAuth={
@@ -67,8 +63,6 @@ export default async function CheckoutPage() {
             : null
         }
       />
-
-      <PublicFooter />
-    </div>
+    </HeaderConfigProvider>
   );
 }

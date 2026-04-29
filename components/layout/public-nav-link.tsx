@@ -49,6 +49,11 @@ export function PublicNavLink({ children, href, onClick, ...props }: PublicNavLi
       window.history.pushState(null, "", nextUrl);
     }
 
+    if (targetHash === "top") {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
+
     const top = computeAnchorScrollTop({
       currentScrollYPx: window.scrollY,
       targetTopRelativeViewportPx: targetElement.getBoundingClientRect().top,

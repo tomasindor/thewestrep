@@ -2,8 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
-import { PublicFooter } from "@/components/layout/public-footer";
-import { PublicHeader } from "@/components/layout/public-header";
+import { HeaderConfigProvider } from "@/components/layout/header-config-context";
 import { OrderHistorySection } from "@/components/profile/order-history-section";
 import { getCustomerSession } from "@/lib/auth/session";
 import { getCustomerOrderHistory } from "@/lib/orders/repository";
@@ -17,12 +16,6 @@ export const metadata: Metadata = createPageMetadata({
   keywords: ["historial", "pedidos", "cuenta customer"],
 });
 
-const historyNavItems = [
-  { href: "/catalogo", label: "Catálogos" },
-  { href: "/stock", label: "Stock" },
-  { href: "/checkout", label: "Checkout" },
-] as const;
-
 export default async function OrderHistoryPage() {
   const customerSession = await getCustomerSession();
 
@@ -33,17 +26,20 @@ export default async function OrderHistoryPage() {
   const orders = await getCustomerOrderHistory(customerSession.user.id);
 
   return (
-    <div className="flex min-h-screen flex-1 flex-col">
-      <PublicHeader
-        navItems={historyNavItems}
-        homeLinkLabel="Volver al inicio de thewestrep"
-        actions={
+    <HeaderConfigProvider
+      config={{
+        navItems: [
+          { href: "/catalogo", label: "Catálogos" },
+          { href: "/stock", label: "Stock" },
+          { href: "/checkout", label: "Checkout" },
+        ],
+        actions: (
           <Link href="/profile" className={compactGhostCtaClassName}>
             Ir al perfil
           </Link>
-        }
-      />
-
+        ),
+      }}
+    >
       <main className="flex-1 py-10 sm:py-14">
         <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-6 lg:px-8">
           <section className="rounded-[2rem] border border-white/10 bg-[linear-gradient(180deg,rgba(12,15,23,0.96),rgba(6,7,11,0.96))] p-6 sm:p-8">
@@ -68,8 +64,6 @@ export default async function OrderHistoryPage() {
           <OrderHistorySection orders={orders} />
         </div>
       </main>
-
-      <PublicFooter />
-    </div>
+    </HeaderConfigProvider>
   );
 }

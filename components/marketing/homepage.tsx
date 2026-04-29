@@ -1,8 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
 
-import { PublicFooter } from "@/components/layout/public-footer";
-import { getPublicNavItems, PublicHeader } from "@/components/layout/public-header";
 import { BrandsSlider } from "@/components/marketing/brands-slider";
 import { HeroPromo } from "@/components/marketing/hero-promo";
 import AuroraBackground from "@/components/ui/aurora-background";
@@ -28,9 +26,7 @@ import { resolveHomepageHeroVariant } from "@/lib/marketing/hero-promo-runtime";
 
 import styles from "./homepage.module.css";
 
-const navItems = getPublicNavItems();
-
-  const heroHighlights = [
+const heroHighlights = [
     "sin trámites aduaneros para vos",
     "sin impuestos sorpresa al recibir",
     "proceso simple y coordinado",
@@ -115,20 +111,8 @@ export async function HomePage({ heroPromoPreview = false }: HomePageProps) {
     ]);
 
   return (
-    <div className="relative isolate">
-      <PublicHeader
-        homeLinkHref="#top"
-        homeLinkLabel="Ir al inicio"
-        navItems={navItems}
-        actions={(
-          <Link href="/catalogo" className={compactGhostCtaClassName}>
-            Ver catálogo
-          </Link>
-        )}
-      />
-
-      <AuroraBackground className={styles.pageAurora}>
-        <div className={styles.contentStack}>
+    <AuroraBackground className={styles.pageAurora}>
+      <div className={styles.contentStack}>
 
       {resolveHomepageHeroVariant({
         isEnabled: heroPromo.isEnabled,
@@ -438,10 +422,7 @@ export async function HomePage({ heroPromoPreview = false }: HomePageProps) {
           </div>
         </Container>
       </section>
-
-          <PublicFooter />
-        </div>
-      </AuroraBackground>
     </div>
+  </AuroraBackground>
   );
 }

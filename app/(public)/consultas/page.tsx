@@ -1,8 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
-import { PublicFooter } from "@/components/layout/public-footer";
-import { getPublicNavItems, PublicHeader } from "@/components/layout/public-header";
 import { FaqAccordion } from "@/components/ui/faq-accordion";
 import { Container } from "@/components/ui/container";
 import { faqItems } from "@/lib/faq";
@@ -53,21 +51,12 @@ export default function ConsultasPage() {
   };
 
   return (
-    <main className="flex-1">
+    <div className="relative isolate">
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{
           __html: sanitizeJsonLd(faqJsonLd),
         }}
-      />
-
-      <PublicHeader
-        navItems={getPublicNavItems()}
-        actions={
-          <Link href="/catalogo" className={compactGhostCtaClassName}>
-            Ver catálogo
-          </Link>
-        }
       />
 
       <Container className="space-y-8 py-12 sm:space-y-10 sm:py-16">
@@ -153,8 +142,6 @@ export default function ConsultasPage() {
           </div>
         </section>
       </Container>
-
-      <PublicFooter />
-    </main>
+    </div>
   );
 }
