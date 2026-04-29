@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
-import test, { afterEach, beforeEach, describe, mock } from "node:test";
+import test, { describe } from "node:test";
 
 import {
   applyRateLimit,
   createRateLimiter,
   extractClientIp,
 } from "../../lib/security/with-rate-limit";
+
+const mutableEnv = process.env as Record<string, string | undefined>;
 
 // Reset the internal limiters Map between tests by reimporting
 // Since the module uses a module-level Map, we need to work around it
@@ -50,53 +52,166 @@ describe("createRateLimiter", () => {
 });
 
 describe("applyRateLimit", () => {
-  test("returns null when within limit", () => {
+  test("bypasses checks when disabled in development", async (t) => {
+    const previousDisable = mutableEnv.DISABLE_RATE_LIMITS;
+    const previousNodeEnv = mutableEnv.NODE_ENV;
+
+    mutableEnv.DISABLE_RATE_LIMITS = "true";
+    mutableEnv.NODE_ENV = "development";
+
+    t.after(() => {
+      if (previousDisable === undefined) {
+        delete mutableEnv.DISABLE_RATE_LIMITS;
+      } else {
+        mutableEnv.DISABLE_RATE_LIMITS = previousDisable;
+      }
+
+      if (previousNodeEnv === undefined) {
+        delete mutableEnv.NODE_ENV;
+      } else {
+        mutableEnv.NODE_ENV = previousNodeEnv;
+      }
+    });
+
+    const request = new Request("http://localhost", {
+      headers: { "x-forwarded-for": "7.7.7.7" },
+    });
+
+    let consumeCalled = false;
+    const result = await applyRateLimit(request, "disabled-dev", { maxRequests: 1, windowMs: 60_000 }, {
+      consumeRateLimit: async () => {
+        consumeCalled = true;
+        return { allowed: false, retryAfterSeconds: 99 };
+      },
+    });
+
+    assert.equal(result, null);
+    assert.equal(consumeCalled, false);
+  });
+
+  test("does not bypass checks in production", async (t) => {
+    const previousDisable = mutableEnv.DISABLE_RATE_LIMITS;
+    const previousNodeEnv = mutableEnv.NODE_ENV;
+
+    mutableEnv.DISABLE_RATE_LIMITS = "true";
+    mutableEnv.NODE_ENV = "production";
+
+    t.after(() => {
+      if (previousDisable === undefined) {
+        delete mutableEnv.DISABLE_RATE_LIMITS;
+      } else {
+        mutableEnv.DISABLE_RATE_LIMITS = previousDisable;
+      }
+
+      if (previousNodeEnv === undefined) {
+        delete mutableEnv.NODE_ENV;
+      } else {
+        mutableEnv.NODE_ENV = previousNodeEnv;
+      }
+    });
+
+    const req = new Request("http://localhost", {
+      headers: { "x-forwarded-for": "8.8.8.8" },
+    });
+    const result = await applyRateLimit(req, "disabled-prod", { maxRequests: 2, windowMs: 60_000 }, {
+      consumeRateLimit: async () => ({ allowed: false, retryAfterSeconds: 42 }),
+    }) as Response;
+
+    assert.notEqual(result, null);
+    assert.equal(result.status, 429);
+    assert.equal(result.headers.get("retry-after"), "42");
+  });
+
+  test("consumes DB-backed key namespaced by route and IP", async () => {
+    const key = `db-consume-${Date.now()}`;
+    let consumedKey = "";
+    let consumedConfig: { maxPoints: number; windowMs: number } | null = null;
+
+    const request = new Request("http://localhost", {
+      headers: { "x-forwarded-for": "1.2.3.4" },
+    });
+
+    const result = await applyRateLimit(request, key, { maxRequests: 5, windowMs: 60_000 }, {
+      consumeRateLimit: async (rateLimitKey, config) => {
+        consumedKey = rateLimitKey;
+        consumedConfig = config;
+        return { allowed: true, retryAfterSeconds: 0 };
+      },
+    });
+
+    assert.equal(result, null);
+    assert.equal(consumedKey, `${key}:1.2.3.4`);
+    assert.deepEqual(consumedConfig, { maxPoints: 5, windowMs: 60_000 });
+  });
+
+  test("returns null when within limit", async () => {
     const key = `within-limit-${Date.now()}`;
     const request = new Request("http://localhost", {
       headers: { "x-forwarded-for": "1.2.3.4" },
     });
-    const result = applyRateLimit(request, key, { maxRequests: 5, windowMs: 60_000 });
+    const result = await applyRateLimit(request, key, { maxRequests: 5, windowMs: 60_000 }, {
+      consumeRateLimit: async () => ({ allowed: true, retryAfterSeconds: 0 }),
+    });
     assert.equal(result, null);
   });
 
-  test("returns 429 when limit exceeded", () => {
-    const key = `exceed-limit-${Date.now()}`;
-    const options = { maxRequests: 2, windowMs: 60_000 };
-    const ip = "5.6.7.8";
-
-    // Exhaust the limit
-    for (let i = 0; i < 2; i++) {
-      const req = new Request("http://localhost", {
-        headers: { "x-forwarded-for": ip },
-      });
-      const result = applyRateLimit(req, key, options);
-      assert.equal(result, null, `request ${i + 1} should pass`);
-    }
-
-    // This one should be blocked
+  test("returns 429 when limit exceeded", async () => {
     const req = new Request("http://localhost", {
-      headers: { "x-forwarded-for": ip },
+      headers: { "x-forwarded-for": "5.6.7.8" },
     });
-    const result = applyRateLimit(req, key, options) as Response;
+    const result = await applyRateLimit(req, "exceed-limit", { maxRequests: 2, windowMs: 60_000 }, {
+      consumeRateLimit: async () => ({ allowed: false, retryAfterSeconds: 42 }),
+    }) as Response;
     assert.notEqual(result, null);
     assert.equal(result.status, 429);
+    assert.equal(result.headers.get("retry-after"), "42");
     assert.ok(result.headers.has("Retry-After"));
   });
 
-  test("fail-open on error", () => {
-    // Mock extractClientIp to throw an error
+  test("fail-open on error", async () => {
     const key = `fail-open-${Date.now()}`;
     const request = new Request("http://localhost", {
       headers: { "x-forwarded-for": "9.9.9.9" },
     });
 
-    // We can't easily inject an error into the limiter itself,
-    // but we can verify the try/catch exists by checking the code path.
-    // The fail-open behavior is inherent in the try/catch block.
-    // For a true test, we'd need to mock the limiter, but since it's module-scoped,
-    // we verify the contract: normal requests still pass through.
-    const result = applyRateLimit(request, key, { maxRequests: 1, windowMs: 60_000 });
-    // If we get here without throwing, the fail-open path is intact
+    const result = await applyRateLimit(request, key, { maxRequests: 1, windowMs: 60_000 }, {
+      consumeRateLimit: async () => {
+        throw new Error("db unavailable");
+      },
+    });
     assert.equal(result, null);
+  });
+
+  test("normal behavior remains when bypass env is missing", async (t) => {
+    const previousDisable = mutableEnv.DISABLE_RATE_LIMITS;
+    const previousNodeEnv = mutableEnv.NODE_ENV;
+
+    delete mutableEnv.DISABLE_RATE_LIMITS;
+    mutableEnv.NODE_ENV = "development";
+
+    t.after(() => {
+      if (previousDisable === undefined) {
+        delete mutableEnv.DISABLE_RATE_LIMITS;
+      } else {
+        mutableEnv.DISABLE_RATE_LIMITS = previousDisable;
+      }
+
+      if (previousNodeEnv === undefined) {
+        delete mutableEnv.NODE_ENV;
+      } else {
+        mutableEnv.NODE_ENV = previousNodeEnv;
+      }
+    });
+
+    const req = new Request("http://localhost", {
+      headers: { "x-forwarded-for": "6.6.6.6" },
+    });
+
+    const result = await applyRateLimit(req, "normal-missing-env", { maxRequests: 1, windowMs: 60_000 }, {
+      consumeRateLimit: async () => ({ allowed: false, retryAfterSeconds: 33 }),
+    }) as Response;
+
+    assert.equal(result.status, 429);
+    assert.equal(result.headers.get("retry-after"), "33");
   });
 });

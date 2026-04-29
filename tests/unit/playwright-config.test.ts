@@ -14,6 +14,11 @@ test("Playwright webServer injects PLAYWRIGHT env flag", () => {
   assert.equal(webServer.env?.PLAYWRIGHT, "1");
 });
 
+test("Playwright webServer enables email-auth UI gate for mocked auth flows", () => {
+  assert.ok(playwrightConfig.webServer);
+  assert.equal(webServer.env?.DATABASE_URL, "postgres://playwright:playwright@127.0.0.1:5432/playwright");
+});
+
 test("Playwright browser sends deterministic admin bypass header", () => {
   assert.equal(playwrightConfig.use?.extraHTTPHeaders?.["x-playwright-admin"], "1");
 });
