@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { customerAccounts } from "@/lib/db/schema";
+import { normalizeCustomerEmail } from "@/lib/auth/customer-credentials";
 import { hashCustomerPassword } from "@/lib/auth/customer-password";
 import type { getDb } from "@/lib/db/core";
 
@@ -18,7 +19,7 @@ export async function requestPasswordReset(
   db: Db,
 ): Promise<void> {
   const account = await db.query.customerAccounts.findFirst({
-    where: eq(customerAccounts.email, email.toLowerCase()),
+    where: eq(customerAccounts.email, normalizeCustomerEmail(email)),
   });
 
   if (!account || !account.passwordHash) {
@@ -45,7 +46,7 @@ export async function resetPassword(
   token: string,
   newPassword: string,
   db: Db,
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; error?: string; customerId?: string }> {
   const account = await db.query.customerAccounts.findFirst({
     where: eq(customerAccounts.passwordResetToken, token),
   });
@@ -65,8 +66,9 @@ export async function resetPassword(
       passwordHash: hashedPassword,
       passwordResetToken: null,
       passwordResetExpiresAt: null,
+      updatedAt: new Date(),
     })
     .where(eq(customerAccounts.id, account.id));
 
-  return { success: true };
+  return { success: true, customerId: account.id };
 }

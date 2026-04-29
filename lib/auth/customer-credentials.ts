@@ -28,8 +28,22 @@ export const customerRegistrationFormSchema = customerRegistrationSchema
         message: "Las contraseñas no coinciden.",
       });
     }
+
   });
 
 export function normalizeCustomerEmail(email: string) {
   return email.trim().toLowerCase();
+}
+
+export function validateCustomerPasswordStrength(password: string) {
+  const parsed = customerPasswordSchema.safeParse(password);
+
+  if (parsed.success) {
+    return { success: true as const };
+  }
+
+  return {
+    success: false as const,
+    message: parsed.error.issues[0]?.message ?? "La contraseña no cumple los requisitos mínimos.",
+  };
 }

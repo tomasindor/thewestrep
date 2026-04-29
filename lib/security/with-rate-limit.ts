@@ -1,6 +1,15 @@
 import { RateLimiter, type RateLimiterOptions } from "./rate-limiter";
+import { DbRateLimiter } from "./db-rate-limiter";
+import { shouldBypassRateLimits } from "./rate-limit-config";
 
 const limiters = new Map<string, RateLimiter>();
+
+interface ApplyRateLimitOptions {
+  consumeRateLimit?: (
+    key: string,
+    config: { maxPoints: number; windowMs: number },
+  ) => Promise<{ allowed: boolean; retryAfterSeconds: number }>;
+}
 
 export function extractClientIp(request: Request): string {
   const forwarded = request.headers.get("x-forwarded-for");
@@ -17,26 +26,45 @@ export function createRateLimiter(key: string, options: Partial<RateLimiterOptio
   return limiters.get(key)!;
 }
 
-export function applyRateLimit(
+export async function applyRateLimit(
   request: Request,
   key: string,
   options: Partial<RateLimiterOptions>,
-): Response | null {
+  applyOptions: ApplyRateLimitOptions = {},
+): Promise<Response | null> {
   try {
-    const limiter = createRateLimiter(key, options);
+    if (shouldBypassRateLimits()) {
+      return null;
+    }
+
     const ip = extractClientIp(request);
-    if (!limiter.isAllowed(ip)) {
-      const retryAfter = Math.ceil(limiter.getRetryAfter(ip) / 1000);
+    const consumeRateLimit = applyOptions.consumeRateLimit
+      ?? (async (rateLimitKey: string, config: { maxPoints: number; windowMs: number }) => {
+        const limiter = new DbRateLimiter();
+        const result = await limiter.consume(rateLimitKey, config);
+
+        return {
+          allowed: result.allowed,
+          retryAfterSeconds: result.retryAfterSeconds,
+        };
+      });
+
+    const result = await consumeRateLimit(`${key}:${ip}`, {
+      maxPoints: options.maxRequests ?? 30,
+      windowMs: options.windowMs ?? 60_000,
+    });
+
+    if (!result.allowed) {
       console.warn(JSON.stringify({
         event: "rate_limited",
         key,
         ip,
-        retryAfter,
+        retryAfter: result.retryAfterSeconds,
         timestamp: new Date().toISOString(),
       }));
       return Response.json(
         { error: "Demasiados intentos. Esperá un momento." },
-        { status: 429, headers: { "Retry-After": String(retryAfter) } },
+        { status: 429, headers: { "Retry-After": String(result.retryAfterSeconds) } },
       );
     }
     return null;
