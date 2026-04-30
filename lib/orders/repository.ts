@@ -12,11 +12,14 @@ import type { OrderHistoryEntrySnapshot } from "@/lib/orders/history";
 import {
   buildMissingCustomerProfilePatch,
   buildOrderPricingSummary,
+  buildOrderPricingSummaryV2,
   getPriceAmount,
   normalizeOrderAuthProvider,
+  type CheckoutOrderItem,
   type CheckoutOrderPayload,
+  type CheckoutOrderPayloadV2,
 } from "@/lib/orders/checkout.shared";
-import { buildOrderReference } from "@/lib/orders/checkout.server";
+import { buildOrderReference, resolveInitialPaymentStatus } from "@/lib/orders/checkout.server";
 
 export interface CreatedOrderSummary {
   authProvider: "guest" | "credentials" | "google";
@@ -25,6 +28,15 @@ export interface CreatedOrderSummary {
   id: string;
   reference: string;
   totalAmountArs: number;
+  paymentMethod: "mercadopago" | "whatsapp" | null;
+  paymentStatus: "pending" | "awaiting_transfer" | "approved" | "rejected" | "expired" | "cancelled";
+}
+
+export interface CreatedOrderSummaryV2 {
+  id: string;
+  reference: string;
+  totalAmountArs: number;
+  status: "pending_payment" | "paid";
 }
 
 export interface PersistedOrderItemRow {
@@ -96,6 +108,13 @@ async function getUniqueOrderReference() {
   return `${buildOrderReference()}-${randomUUID().slice(0, 4).toUpperCase()}`;
 }
 
+export async function getOrderByReference(reference: string) {
+  const db = requireDb();
+  return db.query.orders.findFirst({
+    where: eq(orders.reference, reference),
+  });
+}
+
 export async function getCustomerOrderHistory(customerId: string): Promise<OrderHistoryEntrySnapshot[]> {
   const db = requireDb();
   const customerOrders = await db.query.orders.findMany({
@@ -148,7 +167,7 @@ function getCustomerAccountLink(
 }
 
 export function buildOrderItemRowsForPersistence(input: {
-  payload: CheckoutOrderPayload;
+  payload: { items: CheckoutOrderItem[] };
   orderId: string;
   pricing: ReturnType<typeof buildOrderPricingSummary>;
   idFactory?: () => string;
@@ -201,7 +220,7 @@ export function buildOrderItemRowsForPersistence(input: {
 }
 
 async function syncMissingCustomerProfileFieldsFromCheckout(
-  tx: {
+  txOrDb: {
     select: ReturnType<typeof requireDb>["select"];
     update: ReturnType<typeof requireDb>["update"];
   },
@@ -212,7 +231,7 @@ async function syncMissingCustomerProfileFieldsFromCheckout(
     return;
   }
 
-  const [existingAccount] = await tx.select().from(customerAccounts).where(eq(customerAccounts.id, customerAccountId)).limit(1);
+  const [existingAccount] = await txOrDb.select().from(customerAccounts).where(eq(customerAccounts.id, customerAccountId)).limit(1);
 
   if (!existingAccount) {
     return;
@@ -233,7 +252,7 @@ async function syncMissingCustomerProfileFieldsFromCheckout(
     return;
   }
 
-  await tx
+  await txOrDb
     .update(customerAccounts)
     .set({
       ...patch,
@@ -252,73 +271,81 @@ export async function createOrderFromCheckout(
   const reference = await getUniqueOrderReference();
   const authProvider = normalizeOrderAuthProvider(payload);
   const customerAccountId = getCustomerAccountLink(payload, sessionIdentity);
+  const paymentMethod = payload.paymentMethod ?? null;
+  const paymentStatus = resolveInitialPaymentStatus(payload.paymentMethod);
 
-  await db.transaction(async (tx) => {
-    await tx.insert(orders).values({
-      id: orderId,
-      reference,
-      customerAccountId,
-      checkoutMode: payload.customer.checkoutMode,
-      authProvider,
-      status: "submitted",
+  // Note: Neon HTTP driver doesn't support transactions.
+  // Inserts run sequentially — order items and profile sync won't rollback if the other fails.
+  await db.insert(orders).values({
+    id: orderId,
+    reference,
+    customerAccountId,
+    checkoutMode: payload.customer.checkoutMode,
+    authProvider,
+    status: "pending_payment",
+    paymentStatus,
+    paymentMethod,
+    currencyCode: "ARS",
+    subtotalAmountArs: pricing.subtotalAmountArs,
+    shippingAmountArs: pricing.shippingAmountArs,
+    assistedFeeAmountArs: pricing.assistedFeeAmountArs,
+    totalAmountArs: pricing.totalAmountArs,
+    lineItemCount: payload.items.length,
+    unitCount: pricing.unitCount,
+    containsEncargueItems: payload.items.some((item) => item.availability === "encargue"),
+    contactName: payload.customer.name,
+    contactEmail: payload.customer.email,
+    contactPhone: payload.customer.phone,
+    contactCuil: payload.customer.cuil,
+    preferredChannel: payload.customer.preferredChannel,
+    customerStatus: payload.customer.customerStatus,
+    deliveryRecipient: payload.customer.deliveryRecipient,
+    fulfillment: payload.customer.fulfillment,
+    location: payload.customer.location,
+    provinceId: "",
+    provinceName: "",
+    cityId: "",
+    cityName: "",
+    notes: payload.customer.notes,
+    customerSnapshot: {
+      account:
+        customerAccountId && sessionIdentity
+          ? {
+              id: sessionIdentity.id,
+              email: sessionIdentity.email,
+              name: sessionIdentity.name,
+              authProvider: sessionIdentity.authProvider,
+            }
+          : null,
+      buyer: {
+        name: payload.customer.name,
+        email: payload.customer.email,
+        phone: payload.customer.phone,
+        cuil: payload.customer.cuil,
+        preferredChannel: payload.customer.preferredChannel,
+        customerStatus: payload.customer.customerStatus,
+      },
+      delivery: {
+        recipient: payload.customer.deliveryRecipient,
+        fulfillment: payload.customer.fulfillment,
+        location: payload.customer.location,
+        notes: payload.customer.notes,
+      },
+    },
+    pricingSnapshot: {
       currencyCode: "ARS",
       subtotalAmountArs: pricing.subtotalAmountArs,
+      comboDiscountAmountArs: pricing.comboDiscountAmountArs,
       shippingAmountArs: pricing.shippingAmountArs,
       assistedFeeAmountArs: pricing.assistedFeeAmountArs,
       totalAmountArs: pricing.totalAmountArs,
-      lineItemCount: payload.items.length,
-      unitCount: pricing.unitCount,
-      containsEncargueItems: payload.items.some((item) => item.availability === "encargue"),
-      contactName: payload.customer.name,
-      contactEmail: payload.customer.email,
-      contactPhone: payload.customer.phone,
-      contactCuil: payload.customer.cuil,
-      preferredChannel: payload.customer.preferredChannel,
-      customerStatus: payload.customer.customerStatus,
-      deliveryRecipient: payload.customer.deliveryRecipient,
-      fulfillment: payload.customer.fulfillment,
-      location: payload.customer.location,
-      notes: payload.customer.notes,
-      customerSnapshot: {
-        account:
-          customerAccountId && sessionIdentity
-            ? {
-                id: sessionIdentity.id,
-                email: sessionIdentity.email,
-                name: sessionIdentity.name,
-                authProvider: sessionIdentity.authProvider,
-              }
-            : null,
-        buyer: {
-          name: payload.customer.name,
-          email: payload.customer.email,
-          phone: payload.customer.phone,
-          cuil: payload.customer.cuil,
-          preferredChannel: payload.customer.preferredChannel,
-          customerStatus: payload.customer.customerStatus,
-        },
-        delivery: {
-          recipient: payload.customer.deliveryRecipient,
-          fulfillment: payload.customer.fulfillment,
-          location: payload.customer.location,
-          notes: payload.customer.notes,
-        },
-      },
-      pricingSnapshot: {
-        currencyCode: "ARS",
-        subtotalAmountArs: pricing.subtotalAmountArs,
-        comboDiscountAmountArs: pricing.comboDiscountAmountArs,
-        shippingAmountArs: pricing.shippingAmountArs,
-        assistedFeeAmountArs: pricing.assistedFeeAmountArs,
-        totalAmountArs: pricing.totalAmountArs,
-      },
-      updatedAt: new Date(),
-    });
-
-    await tx.insert(orderItems).values(buildOrderItemRowsForPersistence({ payload, orderId, pricing }));
-
-    await syncMissingCustomerProfileFieldsFromCheckout(tx, payload, customerAccountId);
+    },
+    updatedAt: new Date(),
   });
+
+  await db.insert(orderItems).values(buildOrderItemRowsForPersistence({ payload, orderId, pricing }));
+
+  await syncMissingCustomerProfileFieldsFromCheckout(db, payload, customerAccountId);
 
   return {
     id: orderId,
@@ -327,5 +354,88 @@ export async function createOrderFromCheckout(
     authProvider,
     customerAccountId,
     totalAmountArs: pricing.totalAmountArs,
+    paymentMethod,
+    paymentStatus,
+  };
+}
+
+export async function createOrderFromCheckoutV2(
+  payload: CheckoutOrderPayloadV2,
+  overrides?: {
+    db?: ReturnType<typeof requireDb>;
+    idFactory?: () => string;
+    referenceFactory?: () => string;
+  },
+): Promise<CreatedOrderSummaryV2> {
+  const db = overrides?.db ?? requireDb();
+  const pricing = buildOrderPricingSummaryV2(payload);
+  const orderId = overrides?.idFactory ? overrides.idFactory() : randomUUID();
+  const reference = overrides?.referenceFactory ? overrides.referenceFactory() : await getUniqueOrderReference();
+
+  await db.insert(orders).values({
+    id: orderId,
+    reference,
+    customerAccountId: null,
+    checkoutMode: "guest",
+    authProvider: "guest",
+    status: "pending_payment",
+    paymentStatus: "pending",
+    currencyCode: "ARS",
+    subtotalAmountArs: pricing.subtotalAmountArs,
+    shippingAmountArs: pricing.shippingAmountArs,
+    assistedFeeAmountArs: pricing.assistedFeeAmountArs,
+    totalAmountArs: pricing.totalAmountArs,
+    lineItemCount: payload.items.length,
+    unitCount: pricing.unitCount,
+    containsEncargueItems: payload.items.some((item) => item.availability === "encargue"),
+    contactName: payload.customer.name,
+    contactEmail: payload.customer.email,
+    contactPhone: payload.customer.phone,
+    contactCuil: "",
+    preferredChannel: "",
+    customerStatus: "",
+    deliveryRecipient: payload.customer.recipient,
+    fulfillment: "envio-interior",
+    location: payload.customer.address,
+    provinceId: payload.customer.provinceId,
+    provinceName: payload.customer.provinceName,
+    cityId: payload.customer.cityId,
+    cityName: payload.customer.cityName,
+    notes: payload.customer.notes,
+    customerSnapshot: {
+      account: null,
+      buyer: {
+        name: payload.customer.name,
+        email: payload.customer.email,
+        phone: payload.customer.phone,
+        cuil: "",
+        preferredChannel: "",
+        customerStatus: "",
+      },
+      delivery: {
+        recipient: payload.customer.recipient,
+        fulfillment: "envio-interior",
+        location: payload.customer.address,
+        notes: payload.customer.notes,
+      },
+    },
+    pricingSnapshot: {
+      currencyCode: "ARS",
+      subtotalAmountArs: pricing.subtotalAmountArs,
+      comboDiscountAmountArs: pricing.comboDiscountAmountArs,
+      shippingAmountArs: pricing.shippingAmountArs,
+      assistedFeeAmountArs: pricing.assistedFeeAmountArs,
+      totalAmountArs: pricing.totalAmountArs,
+    },
+    updatedAt: new Date(),
+  });
+
+  await db.insert(orderItems).values(buildOrderItemRowsForPersistence({ payload, orderId, pricing }));
+
+  return {
+    id: orderId,
+    reference,
+    totalAmountArs: pricing.totalAmountArs,
+    status: "pending_payment",
   };
 }

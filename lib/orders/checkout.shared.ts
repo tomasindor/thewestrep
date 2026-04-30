@@ -16,20 +16,32 @@ const orderImageSchema = z
   })
   .optional();
 
-export const checkoutOrderCustomerSchema = z.object({
-  name: z.string().trim().min(2, "Decinos tu nombre y apellido."),
-  phone: z.string().trim().min(6, "Sumá un teléfono para coordinar."),
-  email: z.string().trim().email("Usá un email válido.").transform((value) => value.toLowerCase()),
-  cuil: z.string().trim().max(40).default(""),
-  checkoutMode: z.enum(["guest", "account"]),
-  authProvider: z.enum(["", "credentials", "google"]),
-  preferredChannel: z.enum(["", "whatsapp", "instagram", "email"]),
-  customerStatus: z.enum(["", "new", "returning"]),
-  deliveryRecipient: z.string().trim().max(160).default(""),
-  fulfillment: z.enum(["envio-caba-gba", "envio-interior"]),
-  location: z.string().trim().min(3, "Sumá una referencia de entrega."),
+/**
+ * V2 Simplified Checkout Schema
+ *
+ * Removed: CUIL, checkoutMode, authProvider, customerStatus, fulfillment, location (old address)
+ * Added: provinceId, provinceName, cityId, cityName (Georef), address (free text), recipient
+ *
+ * Two-step flow: Step 1 = create pending order. Step 2 = pay via MP or WhatsApp.
+ */
+export const checkoutOrderCustomerV2Schema = z.object({
+  name: z.string().trim().min(2, "Nombre y apellido."),
+  phone: z.string().trim().min(6, "Teléfono para coordinar."),
+  email: z.string().trim().email("Email válido.").transform((v) => v.toLowerCase()),
+  // Georef address fields
+  provinceId: z.string().trim().min(1, "Seleccioná una provincia."),
+  provinceName: z.string().trim().min(1),
+  cityId: z.string().trim().min(1, "Seleccioná una ciudad."),
+  cityName: z.string().trim().min(1),
+  // Free text address (calle y número)
+  address: z.string().trim().min(4, "Dirección de entrega."),
+  // Who receives the package
+  recipient: z.string().trim().min(2, "Quién recibe el pedido."),
+  // Optional notes
   notes: z.string().trim().max(500).default(""),
 });
+
+export type CheckoutCustomerV2 = z.infer<typeof checkoutOrderCustomerV2Schema>;
 
 export const checkoutOrderItemSchema = z.object({
   id: z.string().trim().min(1),
@@ -59,9 +71,37 @@ export const checkoutOrderItemSchema = z.object({
   sizeLabel: z.string().trim().optional(),
 });
 
+export type CheckoutOrderItem = z.infer<typeof checkoutOrderItemSchema>;
+
+export const checkoutOrderPayloadV2Schema = z.object({
+  customer: checkoutOrderCustomerV2Schema,
+  items: z.array(checkoutOrderItemSchema).min(1, "El pedido necesita al menos un producto."),
+  totalAmountArs: z.number().int().min(0).optional(),
+});
+
+export type CheckoutOrderPayloadV2 = z.infer<typeof checkoutOrderPayloadV2Schema>;
+
+// Legacy schema kept for backward compatibility during V1→V2 transition
+export const checkoutOrderCustomerSchema = z.object({
+  name: z.string().trim().min(2, "Decinos tu nombre y apellido."),
+  phone: z.string().trim().min(6, "Sumá un teléfono para coordinar."),
+  email: z.string().trim().email("Usá un email válido.").transform((value) => value.toLowerCase()),
+  cuil: z.string().trim().max(40).default(""),
+  checkoutMode: z.enum(["guest", "account"]),
+  authProvider: z.enum(["", "credentials", "google"]),
+  preferredChannel: z.enum(["", "whatsapp", "instagram", "email"]),
+  customerStatus: z.enum(["", "new", "returning"]),
+  deliveryRecipient: z.string().trim().max(160).default(""),
+  fulfillment: z.enum(["envio-caba-gba", "envio-interior"]),
+  location: z.string().trim().min(3, "Sumá una referencia de entrega."),
+  notes: z.string().trim().max(500).default(""),
+});
+
 export const checkoutOrderPayloadSchema = z.object({
   customer: checkoutOrderCustomerSchema,
   items: z.array(checkoutOrderItemSchema).min(1, "El pedido necesita al menos un producto."),
+  totalAmountArs: z.number().int().min(0).optional(),
+  paymentMethod: z.enum(["mercadopago", "whatsapp"]).optional(),
 });
 
 export type CheckoutOrderPayload = z.infer<typeof checkoutOrderPayloadSchema>;
@@ -156,6 +196,55 @@ export function buildOrderPricingSummary(payload: CheckoutOrderPayload): OrderPr
     {},
   );
   const shippingAmountArs = getFulfillmentFeeAmount(payload.customer.fulfillment);
+  const assistedFeeAmountArs = payload.items.some((item) => item.availability === "encargue")
+    ? CORREO_ARGENTINO_FEE
+    : 0;
+  const unitCount = payload.items.reduce((total, item) => total + item.quantity, 0);
+
+  return {
+    subtotalAmountArs,
+    comboDiscountAmountArs,
+    comboDiscountByLineId,
+    shippingAmountArs,
+    assistedFeeAmountArs,
+    totalAmountArs: subtotalAmountArs - comboDiscountAmountArs + shippingAmountArs + assistedFeeAmountArs,
+    unitCount,
+  };
+}
+
+export function buildOrderPricingSummaryV2(payload: CheckoutOrderPayloadV2): OrderPricingSummary {
+  const subtotalAmountArs = payload.items.reduce(
+    (total, item) => total + getPriceAmount(item.priceDisplay) * item.quantity,
+    0,
+  );
+  const comboPricing = calculateComboPricing(
+    payload.items.map((item) => ({
+      lineId: item.id,
+      productId: item.productId,
+      productSlug: item.productSlug,
+      productName: item.productName,
+      priceArs: getPriceAmount(item.priceDisplay),
+      quantity: item.quantity,
+      comboGroup: item.comboGroup,
+      comboPriority: item.comboPriority,
+      categorySlug: item.categorySlug,
+    })),
+  );
+  const comboDiscountAmountArs = comboPricing?.comboDiscount ?? 0;
+  const comboDiscountByLineId = (comboPricing?.appliedDiscounts ?? []).reduce<OrderPricingSummary["comboDiscountByLineId"]>(
+    (accumulator, entry) => {
+      const current = accumulator[entry.lineId];
+      accumulator[entry.lineId] = {
+        amountArs: (current?.amountArs ?? 0) + entry.amountArs,
+        reason: entry.reason,
+        pairedWithProductId: entry.pairedWithProductId,
+        pairedWithProductName: entry.pairedWithProductName,
+      };
+      return accumulator;
+    },
+    {},
+  );
+  const shippingAmountArs = 0;
   const assistedFeeAmountArs = payload.items.some((item) => item.availability === "encargue")
     ? CORREO_ARGENTINO_FEE
     : 0;

@@ -1,29 +1,44 @@
-import { createHmac } from "node:crypto";
-
 import { NextResponse } from "next/server";
 
-async function validateSignature(request: Request, rawBody: string): Promise<boolean> {
-  const signature = request.headers.get("x-signature");
-  if (!signature) return false;
+import { getDb } from "@/lib/db/core";
+import { getMercadoPagoWebhookSecret } from "@/lib/env";
+import {
+  defaultProcessWebhookDeps,
+  mapMercadoPagoPaymentStatus,
+  processMercadoPagoWebhook,
+  verifyMercadoPagoSignature,
+} from "@/lib/payments/mercadopago-webhook";
 
-  const expectedSignature = createHmac("sha256", process.env.MERCADOPAGO_WEBHOOK_SECRET || "")
-    .update(rawBody)
-    .digest("hex");
-
-  return signature === expectedSignature;
-}
+export const runtime = "nodejs";
 
 export async function POST(request: Request) {
-  const rawBody = await request.text();
+  const signatureHeader = request.headers.get("x-signature") ?? "";
+  const requestIdHeader = request.headers.get("x-request-id") ?? "";
+  const url = new URL(request.url);
+  const dataId = url.searchParams.get("data.id") ?? "";
 
-  if (!(await validateSignature(request, rawBody))) {
-    return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
-  }
-
+  let payload: unknown;
   try {
-    const body = JSON.parse(rawBody) as { type?: string };
-    return NextResponse.json({ status: "processed", eventType: body.type ?? null });
+    payload = await request.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON payload" }, { status: 400 });
+    return NextResponse.json({ error: "Invalid JSON payload." }, { status: 400 });
   }
+
+  const result = await processMercadoPagoWebhook(
+    payload as import("@/lib/payments/mercadopago-webhook").MercadoPagoWebhookPayload,
+    {
+      signatureHeader,
+      requestIdHeader,
+      dataId,
+    },
+    {
+      verifySignature: verifyMercadoPagoSignature,
+      getWebhookSecret: getMercadoPagoWebhookSecret,
+      getDbInstance: getDb,
+      mapStatus: mapMercadoPagoPaymentStatus,
+      getPayment: defaultProcessWebhookDeps.getPayment,
+    },
+  );
+
+  return NextResponse.json({ message: result.message }, { status: result.status });
 }

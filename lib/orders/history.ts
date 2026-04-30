@@ -1,4 +1,4 @@
-export type OrderHistoryStatus = "submitted" | "cancelled";
+export type OrderHistoryStatus = "pending_payment" | "paid";
 
 export interface OrderHistoryItemSnapshot {
   id: string;
@@ -23,11 +23,15 @@ export interface OrderHistoryEntrySnapshot {
 }
 
 export function formatOrderHistoryStatus(status: OrderHistoryStatus) {
-  if (status === "cancelled") {
-    return "Cancelado";
+  if (status === "pending_payment") {
+    return "Pendiente de pago";
   }
 
-  return "Recibido";
+  if (status === "paid") {
+    return "Pagado";
+  }
+
+  return status;
 }
 
 export function formatOrderHistoryDate(createdAtIso: string) {

@@ -19,8 +19,11 @@ export const importItemsStatusEnum = pgEnum("import_item_status", ["pending", "a
 export const importImagesReviewStateEnum = pgEnum("import_image_review_state", ["pending", "approved", "rejected"]);
 export const orderCheckoutModeEnum = pgEnum("order_checkout_mode", ["guest", "account"]);
 export const orderAuthProviderEnum = pgEnum("order_auth_provider", ["guest", "credentials", "google"]);
-export const orderStatusEnum = pgEnum("order_status", ["submitted", "cancelled"]);
+export const orderStatusEnum = pgEnum("order_status", ["pending_payment", "paid"]);
+export const paymentStatusEnum = pgEnum("payment_status", ["pending", "awaiting_transfer", "approved", "rejected", "expired", "cancelled"]);
+export const orderAuditLogActionEnum = pgEnum("order_audit_log_action", ["status_change", "payment_approval", "delivery_update", "note_added"]);
 export const orderFulfillmentEnum = pgEnum("order_fulfillment", ["envio-caba-gba", "envio-interior"]);
+export const paymentMethodEnum = pgEnum("payment_method", ["mercadopago", "whatsapp"]);
 
 export const customerAccounts = pgTable("customer_accounts", {
   id: text("id").primaryKey(),
@@ -69,7 +72,9 @@ export const orders = pgTable("orders", {
   customerAccountId: text("customer_account_id").references(() => customerAccounts.id, { onDelete: "set null" }),
   checkoutMode: orderCheckoutModeEnum("checkout_mode").notNull(),
   authProvider: orderAuthProviderEnum("auth_provider").notNull().default("guest"),
-  status: orderStatusEnum("status").notNull().default("submitted"),
+  status: orderStatusEnum("status").notNull().default("pending_payment"),
+  paymentStatus: paymentStatusEnum("payment_status").notNull().default("pending"),
+  paymentMethod: paymentMethodEnum("payment_method"),
   currencyCode: text("currency_code").notNull().default("ARS"),
   subtotalAmountArs: integer("subtotal_amount_ars").notNull(),
   shippingAmountArs: integer("shipping_amount_ars").notNull().default(0),
@@ -87,6 +92,10 @@ export const orders = pgTable("orders", {
   deliveryRecipient: text("delivery_recipient").notNull().default(""),
   fulfillment: orderFulfillmentEnum("fulfillment").notNull(),
   location: text("location").notNull(),
+  provinceId: text("province_id"),
+  provinceName: text("province_name"),
+  cityId: text("city_id"),
+  cityName: text("city_name"),
   notes: text("notes").notNull().default(""),
   customerSnapshot: jsonb("customer_snapshot")
     .$type<{
@@ -357,12 +366,32 @@ export const importImageRelations = relations(importImages, ({ one }) => ({
   }),
 }));
 
+export const orderAuditLogs = pgTable("order_audit_logs", {
+  id: text("id").primaryKey(),
+  orderId: text("order_id")
+    .notNull()
+    .references(() => orders.id, { onDelete: "cascade" }),
+  adminId: text("admin_id").notNull(),
+  action: orderAuditLogActionEnum("action").notNull(),
+  previousValue: jsonb("previous_value").$type<Record<string, unknown>>(),
+  newValue: jsonb("new_value").$type<Record<string, unknown>>(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
 export const orderRelations = relations(orders, ({ one, many }) => ({
   customerAccount: one(customerAccounts, {
     fields: [orders.customerAccountId],
     references: [customerAccounts.id],
   }),
   items: many(orderItems),
+  auditLogs: many(orderAuditLogs),
+}));
+
+export const orderAuditLogRelations = relations(orderAuditLogs, ({ one }) => ({
+  order: one(orders, {
+    fields: [orderAuditLogs.orderId],
+    references: [orders.id],
+  }),
 }));
 
 export const orderItemRelations = relations(orderItems, ({ one }) => ({
@@ -415,6 +444,7 @@ export type ImportImageRecord = typeof importImages.$inferSelect;
 export type ProductSizeRecord = typeof productSizes.$inferSelect;
 export type ProductSizeGuideRecord = typeof productSizeGuides.$inferSelect;
 export type ProductVariantRecord = typeof productVariants.$inferSelect;
+export type OrderAuditLogRecord = typeof orderAuditLogs.$inferSelect;
 export const paymentEvents = pgTable("payment_events", {
   id: text("id").primaryKey(),
   orderId: text("order_id")
