@@ -26,6 +26,9 @@ interface SubmittedOrder {
   paymentError: string | null;
   reference: string;
   totalAmountArs: number;
+  paymentMethod: "mercadopago" | "whatsapp" | null;
+  paymentStatus: string;
+  whatsappUrl: string | null;
 }
 
 export interface CheckoutControllerReturn {
@@ -229,7 +232,7 @@ export function useCheckoutController(
       const response = await fetch("/api/orders", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ customer, items }),
+        body: JSON.stringify({ customer, items, totalAmountArs: total, paymentMethod: "mercadopago" }),
       });
       const payload = (await response.json().catch(() => null)) as
         | {
@@ -240,6 +243,8 @@ export function useCheckoutController(
               customerAccountId: string | null;
               reference: string;
               totalAmountArs: number;
+              paymentMethod: "mercadopago" | "whatsapp" | null;
+              paymentStatus: string;
             };
             payment?: {
               checkoutUrl: string;
@@ -249,6 +254,7 @@ export function useCheckoutController(
               sandboxCheckoutUrl: string | null;
             } | null;
             paymentError?: string | null;
+            whatsappUrl?: string | null;
           }
         | null;
 
@@ -261,6 +267,7 @@ export function useCheckoutController(
         ...payload.order,
         payment: payload.payment ?? null,
         paymentError: payload.paymentError ?? null,
+        whatsappUrl: payload.whatsappUrl ?? null,
       });
     });
   };

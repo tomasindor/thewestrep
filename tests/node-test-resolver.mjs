@@ -25,16 +25,16 @@ function resolveAlias(specifier) {
     const relativePath = specifier.slice(2); // Remove @/
     const absolutePath = path.join(projectRoot, relativePath);
     
+    if (fs.existsSync(absolutePath + ".ts")) {
+      return absolutePath + ".ts";
+    }
+
     if (fs.existsSync(absolutePath)) {
       const stat = fs.statSync(absolutePath);
       if (stat.isDirectory()) {
         return path.join(absolutePath, "index.ts");
       }
       return absolutePath;
-    }
-    
-    if (fs.existsSync(absolutePath + ".ts")) {
-      return absolutePath + ".ts";
     }
   }
   return null;

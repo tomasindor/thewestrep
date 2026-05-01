@@ -33,6 +33,9 @@ interface SubmittedOrder {
   paymentError: string | null;
   reference: string;
   totalAmountArs: number;
+  paymentMethod: "mercadopago" | "whatsapp" | null;
+  paymentStatus: string;
+  whatsappUrl: string | null;
 }
 
 interface OrderSummarySidebarProps {
@@ -81,18 +84,19 @@ export function OrderSummarySidebar({
       rel="noreferrer"
       className={`${solidCtaClassName} mt-4 block w-full text-center`}
     >
-      Continuar pago con Mercado Pago
+      Pagar con Mercado Pago
     </a>
-  ) : submittedOrder?.paymentError ? (
-    <div className="mt-4 rounded-[1.2rem] border border-red-300/30 bg-red-500/10 px-4 py-3 text-sm text-red-100">
-      <p>Guardamos tu pedido, pero no pudimos iniciar Mercado Pago. Contactanos por [WhatsApp/email] para coordinar el pago manualmente. Tu referencia es: <span className="font-semibold">{submittedOrder.reference}</span>.</p>
-      <button
-        onClick={() => navigator.clipboard.writeText(submittedOrder.reference)}
-        className="mt-2 rounded-[0.8rem] border border-white/10 bg-white/6 px-3 py-1 text-xs text-slate-200 hover:bg-white/10"
-      >
-        Copiar referencia
-      </button>
-    </div>
+  ) : null;
+
+  const whatsappCallToAction = submittedOrder?.whatsappUrl ? (
+    <a
+      href={submittedOrder.whatsappUrl}
+      target="_blank"
+      rel="noreferrer"
+      className={`${ghostCtaClassName} mt-3 block w-full text-center`}
+    >
+      {submittedOrder.paymentMethod === "whatsapp" ? "Abrir WhatsApp" : "Coordinar por WhatsApp"}
+    </a>
   ) : null;
 
   return (
@@ -244,26 +248,41 @@ export function OrderSummarySidebar({
             <p className="mt-2 text-emerald-50/90">
               Total persistido: <span className="font-semibold text-white">{formatArs(submittedOrder?.totalAmountArs ?? total)}</span>.
             </p>
+            <div className="mt-3 rounded-[1rem] border border-white/10 bg-white/[0.04] p-3 text-sm">
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-slate-300">Método de pago</span>
+                <span className="text-white">{submittedOrder?.paymentMethod === "mercadopago" ? "Mercado Pago" : submittedOrder?.paymentMethod === "whatsapp" ? "WhatsApp" : "Pendiente"}</span>
+              </div>
+              <div className="mt-2 flex items-center justify-between gap-4">
+                <span className="text-slate-300">Estado del pago</span>
+                <span className="text-white">{submittedOrder?.paymentStatus}</span>
+              </div>
+            </div>
+
             {submittedOrder?.payment ? (
-              <p className="mt-2 text-emerald-50/90">
-                El siguiente paso es completar el pago en Mercado Pago con la referencia {submittedOrder.payment.externalReference}.
+              <p className="mt-3 text-emerald-50/90">
+                Completá el pago en Mercado Pago para confirmar tu pedido.
               </p>
             ) : submittedOrder?.paymentError ? (
-              <p className="mt-2 text-amber-100">{submittedOrder.paymentError}</p>
-            ) : (
-              <p className="mt-2 text-emerald-50/90">
-                Guardamos el pedido y el medio de pago queda listo para conectarse cuando se configure Mercado Pago en el entorno.
+              <p className="mt-3 text-amber-100">{submittedOrder.paymentError}</p>
+            ) : null}
+
+            {submittedOrder?.paymentMethod === "whatsapp" ? (
+              <p className="mt-3 text-emerald-50/90">
+                Te contactaremos por WhatsApp para coordinar el pago y la entrega.
               </p>
-            )}
-            <p className="mt-2 text-emerald-50/90">
+            ) : null}
+
+            <p className="mt-3 text-emerald-50/90">
               {submittedOrder?.checkoutMode === "account"
                 ? submittedOrder.customerAccountId
-                  ? "Este pedido quedó enlazado con tu cuenta customer para historial futuro."
-                  : "El pedido quedó marcado como checkout con cuenta, pero sin vínculo persistido de sesión customer."
-                : "Este pedido quedó guardado como guest con snapshot completo de contacto y entrega."}
+                  ? "Este pedido quedó enlazado con tu cuenta para historial futuro."
+                  : "El pedido quedó marcado como checkout con cuenta, pero sin vínculo persistido de sesión."
+                : "Este pedido quedó guardado como invitado con snapshot completo de contacto y entrega."}
             </p>
             <p className="mt-2 text-emerald-50/90">{getCheckoutModeConfirmation(customer.checkoutMode, customer.authProvider)}</p>
             {paymentCallToAction}
+            {whatsappCallToAction}
           </section>
         ) : null}
 

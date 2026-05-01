@@ -21,10 +21,23 @@ export function resolveSmartImageSrc(src: string) {
   return shouldProxyRemoteImage(src) ? buildRemoteImageProxyUrl(src) : src;
 }
 
+function isR2CdnUrl(value: string) {
+  const baseUrl = process.env.NEXT_PUBLIC_R2_PUBLIC_BASE_URL;
+  if (!baseUrl) return false;
+  try {
+    const baseHostname = new URL(baseUrl).hostname;
+    const valueHostname = new URL(value).hostname;
+    return valueHostname === baseHostname;
+  } catch {
+    return false;
+  }
+}
+
 export function SmartImage({ src, alt, fill, width, height, className, sizes, priority, style }: SmartImageProps) {
   const resolvedSrc = resolveSmartImageSrc(src);
   const shouldUseProxy = resolvedSrc !== src;
   const isCloudinarySrc = isCloudinaryAssetUrl(resolvedSrc);
+  const isR2Src = isR2CdnUrl(resolvedSrc);
 
   if (shouldUseProxy) {
     if (fill) {
@@ -36,7 +49,7 @@ export function SmartImage({ src, alt, fill, width, height, className, sizes, pr
     return <img src={resolvedSrc} alt={alt} className={className} width={width} height={height} style={style} />;
   }
 
-  if (resolvedSrc.startsWith("/") || isCloudinarySrc) {
+  if (resolvedSrc.startsWith("/") || isCloudinarySrc || isR2Src) {
     return (
       <Image
         src={resolvedSrc}
@@ -48,7 +61,7 @@ export function SmartImage({ src, alt, fill, width, height, className, sizes, pr
         sizes={sizes}
         priority={priority}
         style={style}
-        unoptimized={isCloudinarySrc}
+        unoptimized={isCloudinarySrc || isR2Src}
       />
     );
   }

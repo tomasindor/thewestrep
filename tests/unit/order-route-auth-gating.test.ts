@@ -47,6 +47,8 @@ test("orders route allows guest checkout without requiring any session", async (
         checkoutMode: "guest",
         customerAccountId: null,
         totalAmountArs: 20_000,
+        paymentMethod: "whatsapp",
+        paymentStatus: "pending",
       };
     },
     createMercadoPagoCheckoutLink: async () => ({ initPoint: "https://mp.test/checkout" }),

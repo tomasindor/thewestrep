@@ -51,6 +51,40 @@ function getFulfillmentLabel(fulfillment: CartCustomerProfile["fulfillment"]) {
   return "";
 }
 
+export function buildOrderWhatsappMessage(
+  order: { reference: string; totalAmountArs: number; items: CartItem[] },
+  customer: CartCustomerProfile,
+) {
+  const normalizedName = normalizeValue(customer.name);
+  const normalizedPhone = normalizeValue(customer.phone);
+  const normalizedEmail = normalizeValue(customer.email);
+  const normalizedLocation = normalizeValue(customer.location);
+  const normalizedNotes = normalizeValue(customer.notes);
+
+  function buildOrderItemDetail(item: CartItem) {
+    const selections = [item.variantLabel?.trim(), item.sizeLabel?.trim()].filter(Boolean);
+    const selectionSuffix = selections.length > 0 ? ` · ${selections.join(" · ")}` : "";
+
+    return `- ${item.quantity}x ${item.productName} (${item.availabilityLabel})${selectionSuffix} · ${item.priceDisplay}`;
+  }
+
+  const lines = [
+    `Hola, tengo un pedido pendiente en TheWestRep: ${order.reference}.`,
+    `Total: $${order.totalAmountArs.toLocaleString("es-AR")}.`,
+    "",
+    "Mis items:",
+    ...order.items.map(buildOrderItemDetail),
+    "",
+    `Nombre: ${normalizedName}`,
+    `Teléfono: ${normalizedPhone}`,
+    `Email: ${normalizedEmail}`,
+    ...(normalizedLocation ? [`Zona o entrega: ${normalizedLocation}`] : []),
+    ...(normalizedNotes ? [`Notas: ${normalizedNotes}`] : []),
+  ];
+
+  return lines.join("\n");
+}
+
 export function buildCartWhatsappMessage(items: CartItem[], customer: CartCustomerProfile) {
   const normalizedName = normalizeValue(customer.name);
   const normalizedPhone = normalizeValue(customer.phone);

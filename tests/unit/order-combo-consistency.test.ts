@@ -94,6 +94,8 @@ test("cart/checkout/mercadopago/order consumers keep identical combo math", () =
       authProvider: "guest",
       customerAccountId: null,
       totalAmountArs: checkoutPricing.totalAmountArs,
+      paymentMethod: "mercadopago" as const,
+      paymentStatus: "pending" as const,
     },
     comboPayload,
   );

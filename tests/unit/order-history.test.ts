@@ -4,8 +4,8 @@ import test from "node:test";
 import { formatOrderHistoryDate, formatOrderHistoryItemLabel, formatOrderHistoryStatus } from "../../lib/orders/history";
 
 test("formats order status labels for profile history", () => {
-  assert.equal(formatOrderHistoryStatus("submitted"), "Recibido");
-  assert.equal(formatOrderHistoryStatus("cancelled"), "Cancelado");
+  assert.equal(formatOrderHistoryStatus("pending_payment"), "Pendiente de pago");
+  assert.equal(formatOrderHistoryStatus("paid"), "Pagado");
 });
 
 test("builds compact order item labels without leaking empty separators", () => {
