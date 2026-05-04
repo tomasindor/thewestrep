@@ -32,6 +32,8 @@ test("builds Mercado Pago preference body with order items and fees", () => {
       authProvider: "guest",
       customerAccountId: null,
       totalAmountArs: 69_100,
+      paymentMethod: "mercadopago" as const,
+      paymentStatus: "pending" as const,
     },
     {
       customer: {
@@ -134,6 +136,8 @@ test("omits optional Mercado Pago webhook when not configured", () => {
       authProvider: "credentials",
       customerAccountId: "customer-1",
       totalAmountArs: 26_500,
+      paymentMethod: "mercadopago" as const,
+      paymentStatus: "pending" as const,
     },
     {
       customer: {

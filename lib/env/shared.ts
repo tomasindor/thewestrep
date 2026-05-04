@@ -89,6 +89,18 @@ export function isMercadoPagoConfigured() {
   return Boolean(getMercadoPagoAccessToken());
 }
 
+/**
+ * Alias for isMercadoPagoConfigured for backward compatibility.
+ * @deprecated Use isMercadoPagoConfigured instead.
+ */
+export function isMercadoPagoEnabled() {
+  return isMercadoPagoConfigured();
+}
+
+export function getMercadoPagoWebhookSecret(): string | null {
+  return readEnv("MERCADOPAGO_WEBHOOK_SECRET");
+}
+
 export function getCloudinaryConfig(): CloudinaryConfig | null {
   const cloudName = readEnv("CLOUDINARY_CLOUD_NAME");
   const apiKey = readEnv("CLOUDINARY_API_KEY");
